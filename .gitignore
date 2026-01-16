@@ -1,0 +1,17 @@
+# --- Rust Essentials ---
+# The build directory (equivalent to /bin and /obj in C#)
+/target/
+
+# Backup files (optional, but good to have)
+**/*.rs.bk
+
+# --- RustRover / JetBrains IDE ---
+# Project settings and workspace preferences
+.idea/
+*.iml
+
+# --- Operating System Files ---
+# Mac
+.DS_Store
+# Windows
+Thumbs.db
