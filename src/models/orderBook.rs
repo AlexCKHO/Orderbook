@@ -1,5 +1,5 @@
-use std::cmp::Ordering;
 use crate::models::order::{Order, OrderEntry, OrderType, Side};
+use std::cmp::Ordering;
 
 struct OrderBook {
     bids: Vec<OrderEntry>,
@@ -7,67 +7,51 @@ struct OrderBook {
 }
 
 impl OrderBook {
-
     fn add_order(&mut self, order: Order) {
-
         if order.order_type == OrderType::Limit {
             if order.side == Side::Bid {
                 self.match_new_limit_bid(order);
-
             } else if order.side == Side::Ask {
-
             }
-        }
-
-        else if order.order_type == OrderType:: Market{
+        } else if order.order_type == OrderType::Market {
             todo!("OrderType:: Market");
-
-
         }
-
     }
 
     // When people are buying
     fn match_new_limit_bid(&mut self, mut new_bid_order: Order) {
+        // Loop until:
+        // 1. Finish matching new_bid_order.qty == 0
+        // 2. Asks is empty
+        // 3. Price mismatch, no ask price is lower or equal to
 
-        if let Some(smallest_ask_order) =  self.asks.last_mut() {
-
-            while new_bid_order.price >= smallest_ask_order.price && new_bid_order.qty > 0 {
-
-                if smallest_ask_order.qty > new_bid_order.qty {
-
-                    smallest_ask_order.qty -= new_bid_order.qty;
-
-                    new_bid_order.qty  = 0;
-
-                    return;
-                } else if smallest_ask_order.qty <  new_bid_order.qty {
-
-                    new_bid_order.qty -= smallest_ask_order.qty;
-
-                    self.asks.pop();
-
-                    return;
-
-                }
-
+        while new_bid_order.qty > 0 {
+            let best_ask = match self.asks.last_mut() {
+                Some(ask) => ask,
+                // Case 2. Asks is empty
+                None => break,
+            };
+            // Case 3. Price mismatch
+            if new_bid_order.price < best_ask.price {
+                break;
             }
 
-
-
-        } else {
-
-            // Ask order is null, which means whole vec of ask order is empty
-            // nothing to match, thus add new bid order to bid vec
-            self.add_order_to_bids_in_order( new_bid_order);
+            if best_ask.qty > new_bid_order.qty {
+                best_ask.qty -= new_bid_order.qty;
+                new_bid_order.qty = 0;
+            } else {
+                // For == and <, all need to pop
+                new_bid_order.qty -= best_ask.qty;
+                self.asks.pop();
+            }
         }
 
-
-
-
+        if new_bid_order.qty > 0 {
+            self.add_order_to_bids_in_order(new_bid_order)
+        }
     }
 
-    pub fn add_order_to_bids_in_order(&mut self, new_bid_order:  Order) {
+    pub fn add_order_to_bids_in_order(&mut self, new_bid_order: Order) {
         // Remaining bid order add to
         if new_bid_order.qty > 0 {
             // Note: 'bids' is sorted by price in ascending order (Small -> Big).
@@ -97,15 +81,9 @@ impl OrderBook {
             // the search effectively fails to "find" a match but provides the correct insertion index via Err.
             let index = result.unwrap_or_else(|i| i);
 
-            self.bids.insert(index, OrderEntry::new(&new_bid_order) );
+            self.bids.insert(index, OrderEntry::new(&new_bid_order));
         }
     }
 
-
-
-    pub fn add_order_to_asks_in_order(&mut self, order: Order) {
-
-    }
-
-
+    pub fn add_order_to_asks_in_order(&mut self, order: Order) {}
 }
