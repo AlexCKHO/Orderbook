@@ -27,8 +27,6 @@ pub struct OrderEntry {
     pub price: u64,
     pub qty: u64,
     
-    
-    
 }
 
 impl OrderEntry {
