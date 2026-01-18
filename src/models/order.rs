@@ -20,3 +20,23 @@ pub struct Order {
     pub order_type: OrderType,
 
 }
+
+#[derive(Debug, Clone)]
+pub struct OrderEntry {
+    pub id: u64,
+    pub price: u64,
+    pub qty: u64,
+    
+    
+    
+}
+
+impl OrderEntry {
+    pub fn new(order: &Order) -> Self {
+        Self {
+            id: order.id,
+            price: order.price,
+            qty: order.qty,
+        }
+    }
+}
