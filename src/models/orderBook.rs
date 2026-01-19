@@ -85,5 +85,26 @@ impl OrderBook {
         }
     }
 
-    pub fn add_order_to_asks_in_order(&mut self, order: Order) {}
+    pub fn add_order_to_asks_in_order(&mut self, new_ask_order: Order) {
+        // Index:   0      1      2      ...    Last
+        // Price:  $100   $99    $98           $90 (cheapest, best asks)
+        //     ($$$$) ---------------------> ($)
+        // 
+        if new_ask_order.qty > 0 {
+            let result = self.asks.binary_search_by(|probe| {
+                if probe.price > new_ask_order.price {
+                    // Case: Probe price is higher than the new order.
+                    // Action: Search the left side (smaller indices).
+                    Ordering::Less
+                } else if probe.price < new_ask_order.price {
+                    Ordering::Greater
+                } else {
+                    Ordering::Greater
+                }
+            });
+
+            let index = result.unwrap_or_else(|i| i);
+            self.asks.insert(index, OrderEntry::new(&new_ask_order));
+        }
+    }
 }
