@@ -12,6 +12,7 @@ impl OrderBook {
             if order.side == Side::Bid {
                 self.match_new_limit_bid(order);
             } else if order.side == Side::Ask {
+                self.match_new_limit_ask(order);
             }
         } else if order.order_type == OrderType::Market {
             todo!("OrderType:: Market");
@@ -51,59 +52,75 @@ impl OrderBook {
         }
     }
 
-    pub fn add_order_to_bids_in_order(&mut self, new_bid_order: Order) {
-        // Remaining bid order add to
-        if new_bid_order.qty > 0 {
-            // Note: 'bids' is sorted by price in ascending order (Small -> Big).
-            // Reason: This allows us to instantly pop() the best bid (highest price)
-            // from the end of the vector, achieving O(1) complexity.
-            let result = self.bids.binary_search_by(|probe| {
-                if probe.price > new_bid_order.price {
-                    // Case: Probe price is higher than the new order.
-                    // Action: Search the left side (smaller indices).
-                    Ordering::Greater
-                } else if probe.price < new_bid_order.price {
-                    // Case: Probe price is lower than the new order.
-                    // Action: Search the right side (larger indices).
-                    Ordering::Less
-                } else {
-                    // Case: Prices are equal.
-                    // Crucial Logic for FIFO (Price-Time Priority):
-                    // We intentionally treat the probe as "smaller" (Less) here.
-                    // This forces the binary search to continue looking towards the right.
-                    // As a result, the insertion index will be placed *after* all existing
-                    // orders with the same price, preserving the time priority.
-                    Ordering::Less
-                }
-            });
+    fn match_new_limit_ask(&mut self, mut new_ask_order: Order) {
+        // Loop until:
+        // 1. Finish matching new_ask_order.qty == 0
+        // 2. Bids is empty, no orders to be matched
+        // 3. Price mismatch, no bid price is higher or equal to
 
-            // Since we intentionally avoid returning Ordering::Equal to enforce FIFO,
-            // the search effectively fails to "find" a match but provides the correct insertion index via Err.
-            let index = result.unwrap_or_else(|i| i);
+        while new_ask_order.qty > 0 {
+            let best_bid = match self.bids.last_mut() {
+                Some(bid) => bid,
+                // 2. Bids is empty,
+                None => break,
+            };
+            // 3. Price mismatch, no bid price is higher or equal to
+            // Even the best price people providing is smaller than new ask price
+            // there is no chance for matching, thus break
+            if new_ask_order.price > best_bid.price {
+                break;
+            }
+
+            if best_bid.qty > new_ask_order.qty {
+                best_bid.qty -= new_ask_order.qty;
+                new_ask_order.qty = 0
+            } else {
+                new_ask_order.qty -= best_bid.qty;
+                self.bids.pop();
+            }
+        }
+
+        if new_ask_order.qty > 0 {
+            self.add_order_to_asks_in_order(new_ask_order)
+        }
+    }
+
+    pub fn add_order_to_bids_in_order(&mut self, new_bid_order: Order) {
+        if new_bid_order.qty > 0 {
+            // Bids are sorted in Ascending order: [Smallest Price ... Highest Price].
+            // Example: [98, 99, 100(Old)]
+            // Reason: This allows O(1) popping of the Best Bid (Highest) from the end.
+
+            // --- FIFO Logic (Price-Time Priority) ---
+            // We need to insert the NEW order *before* the OLD order of the same price.
+            // Target Layout: [98, 99, 100(New), 100(Old)]
+            // This ensures that pop() retrieves 100(Old) first.
+
+            // 'partition_point' returns the index of the first element where the predicate is FALSE.
+            // Predicate: "Is x.price < new.price?"
+            // We want the first element where !(x < new), which implies x >= new.
+            let index = self.bids.partition_point(|x| x.price < new_bid_order.price);
 
             self.bids.insert(index, OrderEntry::new(&new_bid_order));
         }
     }
 
     pub fn add_order_to_asks_in_order(&mut self, new_ask_order: Order) {
-        // Index:   0      1      2      ...    Last
-        // Price:  $100   $99    $98           $90 (cheapest, best asks)
-        //     ($$$$) ---------------------> ($)
-        // 
         if new_ask_order.qty > 0 {
-            let result = self.asks.binary_search_by(|probe| {
-                if probe.price > new_ask_order.price {
-                    // Case: Probe price is higher than the new order.
-                    // Action: Search the left side (smaller indices).
-                    Ordering::Less
-                } else if probe.price < new_ask_order.price {
-                    Ordering::Greater
-                } else {
-                    Ordering::Greater
-                }
-            });
+            // Asks are sorted in Descending order: [Highest Price ... Smallest Price].
+            // Example: [102, 101, 100(Old)]
+            // Reason: This allows O(1) popping of the Best Ask (Lowest) from the end.
 
-            let index = result.unwrap_or_else(|i| i);
+            // --- FIFO Logic (Price-Time Priority) ---
+            // We need to insert the NEW order *before* the OLD order of the same price.
+            // Target Layout: [102, 101, 100(New), 100(Old)]
+            // This ensures that pop() retrieves 100(Old) first.
+
+            // 'partition_point' returns the index of the first element where the predicate is FALSE.
+            // Predicate: "Is x.price > new.price?"
+            // We want the first element where !(x > new), which implies x <= new.
+            let index = self.asks.partition_point(|x| x.price > new_ask_order.price);
+
             self.asks.insert(index, OrderEntry::new(&new_ask_order));
         }
     }
