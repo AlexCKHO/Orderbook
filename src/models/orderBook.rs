@@ -73,7 +73,7 @@ impl OrderBook {
 
             if best_bid.qty > new_ask_order.qty {
                 best_bid.qty -= new_ask_order.qty;
-                new_ask_order.qty = 0
+                new_ask_order.qty = 0;
             } else {
                 new_ask_order.qty -= best_bid.qty;
                 self.bids.pop();
