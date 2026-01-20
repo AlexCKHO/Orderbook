@@ -14,7 +14,11 @@ impl OrderBook {
                 self.match_new_limit_ask(order);
             }
         } else if order.order_type == OrderType::Market {
-            todo!("OrderType:: Market");
+            if order.side == Side::Bid {
+                self.match_new_market_bid(order);
+            } else if order.side == Side::Ask {
+                self.match_new_market_ask(order);
+            }
         }
     }
 
@@ -81,6 +85,71 @@ impl OrderBook {
 
         if new_ask_order.qty > 0 {
             self.add_order_to_asks_in_order(new_ask_order)
+        }
+    }
+
+    fn match_new_market_bid(&mut self, mut new_bid_order: Order) {
+        // Loop until:
+        // 1. Finish matching new_bid_order.qty == 0
+        // 2. Asks is empty
+
+        while new_bid_order.qty > 0 {
+            let best_ask = match self.asks.last_mut() {
+                Some(ask) => ask,
+                None => break,
+            };
+
+            if best_ask.qty > new_bid_order.qty {
+                best_ask.qty -= new_bid_order.qty;
+                new_bid_order.qty = 0;
+                break;
+            } else {
+                new_bid_order.qty -= best_ask.qty;
+                self.asks.pop();
+            }
+        }
+
+        // Notes: If there are remaining
+        // and the asks can't fulfil the bid.qty, just kill the order
+        // Standard Immediate-Or-Cancel approach
+        if new_bid_order.qty > 0 {
+            println!(
+                "Market Order partially filled. Remaining {} qty killed.",
+                new_bid_order.qty
+            );
+        }
+    }
+
+    fn match_new_market_ask(&mut self, mut new_ask_order: Order) {
+        // Loop until:
+        // 1. Finish matching new_ask_order.qty == 0
+        // 2. Bids is empty
+
+        while new_ask_order.qty > 0 {
+            let best_bid = match self.bids.last_mut() {
+                Some(bid) => bid,
+                None => break,
+            };
+
+            if best_bid.qty > new_ask_order.qty {
+                best_bid.qty -= new_ask_order.qty;
+                new_ask_order.qty = 0;
+                break
+            } else {
+                new_ask_order.qty -= best_bid.qty;
+                self.bids.pop();
+            }
+        }
+
+        // Notes: If there are remaining
+        // and the asks can't fulfil the bid.qty, just kill the order
+        // Standard Immediate-Or-Cancel approach
+
+        if new_ask_order.qty > 0 {
+            println!(
+                "Market Order partially filled. Remaining {} qty killed.",
+                new_ask_order.qty
+            );
         }
     }
 
@@ -246,5 +315,40 @@ mod tests {
         assert_eq!(ob.asks[0].id, 2);
 
         println!("✅ Test Passed: Asks FIFO (Price-Time Priority) is Correct!");
+    }
+
+    #[test]
+    fn test_market_order_ioc() {
+        let mut ob = OrderBook {
+            bids: vec![],
+            asks: vec![],
+        };
+
+        // 1. Setup Liquidity (Asks)
+        // Sell @ 100, Qty 10
+        ob.add_order(new_order(1, 100, 10, Side::Ask, OrderType::Limit));
+        // Sell @ 102, Qty 20
+        ob.add_order(new_order(2, 102, 20, Side::Ask, OrderType::Limit));
+
+        // 2. Market Buy comes in (Qty 15)
+        // 佢應該會食晒 $100 (10個)，再食 $102 (5個)
+        ob.add_order(new_order(3, 0, 15, Side::Bid, OrderType::Market));
+
+        // Check: $100 層應該無咗 (Pop)
+        assert_eq!(ob.asks.len(), 1);
+        // Check: $102 層應該剩返 15 (20 - 5)
+        assert_eq!(ob.asks[0].qty, 15);
+        assert_eq!(ob.asks[0].price, 102);
+
+        // 3. Huge Market Buy (Qty 1000)
+        // 食晒剩低嗰 15 個，然後自己 Kill 唔排隊
+        ob.add_order(new_order(4, 0, 1000, Side::Bid, OrderType::Market));
+
+        // Check: Asks 應該空晒
+        assert_eq!(ob.asks.len(), 0);
+        // Check: Bids 都應該係空 (因為 Market Order 唔排隊 IOC)
+        assert_eq!(ob.bids.len(), 0);
+
+        println!("✅ Test Passed: Market Order IOC logic is correct!");
     }
 }
