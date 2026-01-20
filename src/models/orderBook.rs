@@ -119,9 +119,94 @@ impl OrderBook {
             // 'partition_point' returns the index of the first element where the predicate is FALSE.
             // Predicate: "Is x.price > new.price?"
             // We want the first element where !(x > new), which implies x <= new.
+            // The loop continues as long as x.price < new_bid_order.price is true, and breaks immediately once it becomes false.
             let index = self.asks.partition_point(|x| x.price > new_ask_order.price);
 
             self.asks.insert(index, OrderEntry::new(&new_ask_order));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Helper function to construct Orders to reduce boilerplate code in tests.
+    fn new_order(id: u64, price: u64, qty: u64, side: Side, order_type: OrderType) -> Order {
+        Order {
+            id,
+            price,
+            qty,
+            side,
+            order_type,
+            // Initialize timestamp here if added in the future
+        }
+    }
+
+    #[test]
+    fn test_limit_order_matching() {
+        // 1. Initialize OrderBook
+        let mut ob = OrderBook {
+            bids: Vec::new(),
+            asks: Vec::new(),
+        };
+
+        // 2. Scenario: User A places a Sell order (Maker)
+        // Ask @ 100, Qty 10
+        let ask_order = new_order(1, 100, 10, Side::Ask, OrderType::Limit);
+        ob.add_order(ask_order);
+
+        // Check: Order should be successfully added to the Asks queue
+        assert_eq!(ob.asks.len(), 1);
+        assert_eq!(ob.bids.len(), 0);
+
+        // 3. Scenario: User B tries to Buy (Taker), but price is too low
+        // Bid @ 99, Qty 5
+        let bid_cheap = new_order(2, 99, 5, Side::Bid, OrderType::Limit);
+        ob.add_order(bid_cheap);
+
+        // Check: No match should occur due to price mismatch. Order enters Bids queue.
+        assert_eq!(ob.bids.len(), 1);
+        assert_eq!(ob.asks[0].qty, 10); // The Ask order remains untouched
+
+        // 4. Scenario: User C places a Buy order (Taker) with matching price (Aggressive)
+        // Bid @ 100, Qty 3
+        let bid_match = new_order(3, 100, 3, Side::Bid, OrderType::Limit);
+        ob.add_order(bid_match);
+
+        // Check: Immediate match should occur!
+        // Bids queue should still have 1 order (User C is filled immediately, User B remains)
+        assert_eq!(ob.bids.len(), 1);
+
+        // Asks queue should still have 1 order, but quantity reduces from 10 to 7 (Partial Fill)
+        assert_eq!(ob.asks.len(), 1);
+        assert_eq!(ob.asks[0].qty, 7);
+
+        println!("✅ Test Passed: Basic Matching Logic is Correct!");
+    }
+
+    #[test]
+    fn test_fifo_ordering() {
+        let mut ob = OrderBook {
+            bids: Vec::new(),
+            asks: Vec::new(),
+        };
+
+        // User A places Bid @ 100 (First arrival)
+        ob.add_order(new_order(1, 100, 10, Side::Bid, OrderType::Limit));
+
+        // User B places Bid @ 100 (Arrives later)
+        ob.add_order(new_order(2, 100, 10, Side::Bid, OrderType::Limit));
+
+        // Expected Memory Layout (Bids are Ascending):
+        // [100 (User B/New), 100 (User A/Old)]
+        // pop() retrieves from the end -> gets User A (Old) first.
+
+        // Validation Logic:
+        // An incoming Sell order @ 100, Qty 10 should completely fill User A, leaving User B.
+        ob.add_order(new_order(3, 100, 10, Side::Ask, OrderType::Limit));
+
+        // The remaining order in the book should be User B (ID 2), honoring Time Priority.
+        assert_eq!(ob.bids[0].id, 2);
     }
 }
