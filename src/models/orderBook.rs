@@ -1,5 +1,4 @@
 use crate::models::order::{Order, OrderEntry, OrderType, Side};
-use std::cmp::Ordering;
 
 struct OrderBook {
     bids: Vec<OrderEntry>,
@@ -208,5 +207,44 @@ mod tests {
 
         // The remaining order in the book should be User B (ID 2), honoring Time Priority.
         assert_eq!(ob.bids[0].id, 2);
+    }
+
+    #[test]
+    fn test_asks_fifo_ordering() {
+        let mut ob = OrderBook {
+            bids: Vec::new(),
+            asks: Vec::new(),
+        };
+
+        // 1. Seller A places Ask @ 100 (First arrival - "The Old Order")
+        // ID: 1
+        ob.add_order(new_order(1, 100, 10, Side::Ask, OrderType::Limit));
+
+        // 2. Seller B places Ask @ 100 (Later arrival - "The New Order")
+        // ID: 2
+        ob.add_order(new_order(2, 100, 10, Side::Ask, OrderType::Limit));
+
+        // --- Memory Layout Check (Mental Model) ---
+        // Asks are sorted Descending: [Highest ... Lowest]
+        // Since Price is equal, Logic dictates New comes BEFORE Old.
+        // Expected Vector State: [ {ID:2, Price:100}, {ID:1, Price:100} ]
+        // The last element (ID:1) is the "Best Ask" because it arrived first.
+
+        // 3. Buyer C comes in to Buy 10 units @ 100
+        // This should trigger a match against the "Best Ask".
+        ob.add_order(new_order(3, 100, 10, Side::Bid, OrderType::Limit));
+
+        // --- Assertions ---
+        // Buyer C should be fully filled.
+        assert_eq!(ob.bids.len(), 0);
+
+        // One Ask should remain.
+        assert_eq!(ob.asks.len(), 1);
+
+        // The remaining Ask MUST be User B (ID: 2).
+        // Why? Because User A (ID: 1) was at the end of the vector and got popped first.
+        assert_eq!(ob.asks[0].id, 2);
+
+        println!("✅ Test Passed: Asks FIFO (Price-Time Priority) is Correct!");
     }
 }
