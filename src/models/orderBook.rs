@@ -318,37 +318,83 @@ mod tests {
     }
 
     #[test]
-    fn test_market_order_ioc() {
+    fn test_market_bid_order_ioc() {
         let mut ob = OrderBook {
             bids: vec![],
             asks: vec![],
         };
 
         // 1. Setup Liquidity (Asks)
-        // Sell @ 100, Qty 10
+        // Seller A: Limit Sell @ 100, Qty 10 (Best Price)
         ob.add_order(new_order(1, 100, 10, Side::Ask, OrderType::Limit));
-        // Sell @ 102, Qty 20
+        // Seller B: Limit Sell @ 102, Qty 20 (Worse Price)
         ob.add_order(new_order(2, 102, 20, Side::Ask, OrderType::Limit));
 
         // 2. Market Buy comes in (Qty 15)
-        // 佢應該會食晒 $100 (10個)，再食 $102 (5個)
+        // Expectation: It should consume the entire level at $100 (10 qty) 
+        // and partially consume the level at $102 (5 qty).
         ob.add_order(new_order(3, 0, 15, Side::Bid, OrderType::Market));
 
-        // Check: $100 層應該無咗 (Pop)
+        // Check: The $100 price level should be fully consumed (Popped).
         assert_eq!(ob.asks.len(), 1);
-        // Check: $102 層應該剩返 15 (20 - 5)
+
+        // Check: The $102 price level should remain with 15 qty (20 - 5).
+        // Since Asks are sorted Descending, the remaining one is at index 0.
         assert_eq!(ob.asks[0].qty, 15);
         assert_eq!(ob.asks[0].price, 102);
 
         // 3. Huge Market Buy (Qty 1000)
-        // 食晒剩低嗰 15 個，然後自己 Kill 唔排隊
+        // Expectation: Consumes the remaining 15 units, then the rest of the order is killed (IOC).
+        // It does NOT enter the queue.
         ob.add_order(new_order(4, 0, 1000, Side::Bid, OrderType::Market));
 
-        // Check: Asks 應該空晒
+        // Check: Asks should be completely empty.
         assert_eq!(ob.asks.len(), 0);
-        // Check: Bids 都應該係空 (因為 Market Order 唔排隊 IOC)
+        // Check: Bids should also be empty (because Market Orders are IOC and don't queue).
         assert_eq!(ob.bids.len(), 0);
 
-        println!("✅ Test Passed: Market Order IOC logic is correct!");
+        println!("✅ Test Passed: Market Bid Order (IOC) logic is correct!");
+    }
+
+    #[test]
+    fn test_market_ask_order_ioc() {
+        let mut ob = OrderBook {
+            bids: vec![],
+            asks: vec![],
+        };
+
+        // 1. Setup Liquidity (Bids)
+        // Buyer A: Limit Buy @ 98, Qty 20 (Lower Price)
+        ob.add_order(new_order(1, 98, 20, Side::Bid, OrderType::Limit));
+        // Buyer B: Limit Buy @ 100, Qty 10 (Higher/Best Price)
+        ob.add_order(new_order(2, 100, 10, Side::Bid, OrderType::Limit));
+
+        // Verify Layout: Bids are Ascending [98, 100]. 
+        // pop() takes from the end, so it should take $100 first.
+
+        // 2. Market Sell comes in (Qty 15)
+        // Expectation: It should hit the Best Bid ($100) first (eats 10),
+        // then hit the Next Best Bid ($98) (eats 5).
+        ob.add_order(new_order(3, 0, 15, Side::Ask, OrderType::Market));
+
+        // Check: The $100 Bid should be fully consumed (Popped).
+        // Only 1 bid level remains.
+        assert_eq!(ob.bids.len(), 1);
+
+        // Check: The remaining Bid should be the $98 one, with qty reduced.
+        // Original 20 - 5 consumed = 15 remaining.
+        assert_eq!(ob.bids[0].price, 98);
+        assert_eq!(ob.bids[0].qty, 15);
+
+        // 3. Huge Market Sell (Qty 1000)
+        // Expectation: Consumes the remaining 15 units at $98.
+        // The rest of the sell order (985 qty) is Killed immediately (IOC).
+        ob.add_order(new_order(4, 0, 1000, Side::Ask, OrderType::Market));
+
+        // Check: Orderbook should be completely empty.
+        assert_eq!(ob.bids.len(), 0);
+        assert_eq!(ob.asks.len(), 0);
+
+        println!("✅ Test Passed: Market Ask Order (IOC) logic is correct!");
     }
 }
