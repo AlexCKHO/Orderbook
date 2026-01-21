@@ -200,13 +200,14 @@ mod tests {
     use super::*;
 
     /// Helper function to construct Orders to reduce boilerplate code in tests.
-    fn new_order(id: u64, price: u64, qty: u64, side: Side, order_type: OrderType) -> Order {
+    fn new_order(id: u64, price: u64, qty: u64, side: Side, order_type: OrderType, timestamp: i64) -> Order {
         Order {
             id,
             price,
             qty,
             side,
             order_type,
+            timestamp,
             // Initialize timestamp here if added in the future
         }
     }
@@ -221,7 +222,7 @@ mod tests {
 
         // 2. Scenario: User A places a Sell order (Maker)
         // Ask @ 100, Qty 10
-        let ask_order = new_order(1, 100, 10, Side::Ask, OrderType::Limit);
+        let ask_order = new_order(1, 100, 10, Side::Ask, OrderType::Limit, 1768032384123456789);
         ob.add_order(ask_order);
 
         // Check: Order should be successfully added to the Asks queue
@@ -230,7 +231,7 @@ mod tests {
 
         // 3. Scenario: User B tries to Buy (Taker), but price is too low
         // Bid @ 99, Qty 5
-        let bid_cheap = new_order(2, 99, 5, Side::Bid, OrderType::Limit);
+        let bid_cheap = new_order(2, 99, 5, Side::Bid, OrderType::Limit, 1768052384123456789);
         ob.add_order(bid_cheap);
 
         // Check: No match should occur due to price mismatch. Order enters Bids queue.
@@ -239,7 +240,7 @@ mod tests {
 
         // 4. Scenario: User C places a Buy order (Taker) with matching price (Aggressive)
         // Bid @ 100, Qty 3
-        let bid_match = new_order(3, 100, 3, Side::Bid, OrderType::Limit);
+        let bid_match = new_order(3, 100, 3, Side::Bid, OrderType::Limit, 1768082384123456789);
         ob.add_order(bid_match);
 
         // Check: Immediate match should occur!
@@ -261,10 +262,10 @@ mod tests {
         };
 
         // User A places Bid @ 100 (First arrival)
-        ob.add_order(new_order(1, 100, 10, Side::Bid, OrderType::Limit));
+        ob.add_order(new_order(1, 100, 10, Side::Bid, OrderType::Limit, 1768032384123456789));
 
         // User B places Bid @ 100 (Arrives later)
-        ob.add_order(new_order(2, 100, 10, Side::Bid, OrderType::Limit));
+        ob.add_order(new_order(2, 100, 10, Side::Bid, OrderType::Limit, 1768052384123456789));
 
         // Expected Memory Layout (Bids are Ascending):
         // [100 (User B/New), 100 (User A/Old)]
@@ -272,7 +273,7 @@ mod tests {
 
         // Validation Logic:
         // An incoming Sell order @ 100, Qty 10 should completely fill User A, leaving User B.
-        ob.add_order(new_order(3, 100, 10, Side::Ask, OrderType::Limit));
+        ob.add_order(new_order(3, 100, 10, Side::Ask, OrderType::Limit, 1768082384123456789));
 
         // The remaining order in the book should be User B (ID 2), honoring Time Priority.
         assert_eq!(ob.bids[0].id, 2);
@@ -287,11 +288,11 @@ mod tests {
 
         // 1. Seller A places Ask @ 100 (First arrival - "The Old Order")
         // ID: 1
-        ob.add_order(new_order(1, 100, 10, Side::Ask, OrderType::Limit));
+        ob.add_order(new_order(1, 100, 10, Side::Ask, OrderType::Limit, 1768032384123456789));
 
         // 2. Seller B places Ask @ 100 (Later arrival - "The New Order")
         // ID: 2
-        ob.add_order(new_order(2, 100, 10, Side::Ask, OrderType::Limit));
+        ob.add_order(new_order(2, 100, 10, Side::Ask, OrderType::Limit, 1768052384123456789));
 
         // --- Memory Layout Check (Mental Model) ---
         // Asks are sorted Descending: [Highest ... Lowest]
@@ -301,7 +302,7 @@ mod tests {
 
         // 3. Buyer C comes in to Buy 10 units @ 100
         // This should trigger a match against the "Best Ask".
-        ob.add_order(new_order(3, 100, 10, Side::Bid, OrderType::Limit));
+        ob.add_order(new_order(3, 100, 10, Side::Bid, OrderType::Limit, 1768082384123456789));
 
         // --- Assertions ---
         // Buyer C should be fully filled.
@@ -326,14 +327,14 @@ mod tests {
 
         // 1. Setup Liquidity (Asks)
         // Seller A: Limit Sell @ 100, Qty 10 (Best Price)
-        ob.add_order(new_order(1, 100, 10, Side::Ask, OrderType::Limit));
+        ob.add_order(new_order(1, 100, 10, Side::Ask, OrderType::Limit,1768032384123456789));
         // Seller B: Limit Sell @ 102, Qty 20 (Worse Price)
-        ob.add_order(new_order(2, 102, 20, Side::Ask, OrderType::Limit));
+        ob.add_order(new_order(2, 102, 20, Side::Ask, OrderType::Limit, 1768033384123456789));
 
         // 2. Market Buy comes in (Qty 15)
         // Expectation: It should consume the entire level at $100 (10 qty) 
         // and partially consume the level at $102 (5 qty).
-        ob.add_order(new_order(3, 0, 15, Side::Bid, OrderType::Market));
+        ob.add_order(new_order(3, 0, 15, Side::Bid, OrderType::Market, 1768033484123456789));
 
         // Check: The $100 price level should be fully consumed (Popped).
         assert_eq!(ob.asks.len(), 1);
@@ -346,7 +347,7 @@ mod tests {
         // 3. Huge Market Buy (Qty 1000)
         // Expectation: Consumes the remaining 15 units, then the rest of the order is killed (IOC).
         // It does NOT enter the queue.
-        ob.add_order(new_order(4, 0, 1000, Side::Bid, OrderType::Market));
+        ob.add_order(new_order(4, 0, 1000, Side::Bid, OrderType::Market, 1768033485123456789));
 
         // Check: Asks should be completely empty.
         assert_eq!(ob.asks.len(), 0);
@@ -365,9 +366,9 @@ mod tests {
 
         // 1. Setup Liquidity (Bids)
         // Buyer A: Limit Buy @ 98, Qty 20 (Lower Price)
-        ob.add_order(new_order(1, 98, 20, Side::Bid, OrderType::Limit));
+        ob.add_order(new_order(1, 98, 20, Side::Bid, OrderType::Limit, 1768033384123456789));
         // Buyer B: Limit Buy @ 100, Qty 10 (Higher/Best Price)
-        ob.add_order(new_order(2, 100, 10, Side::Bid, OrderType::Limit));
+        ob.add_order(new_order(2, 100, 10, Side::Bid, OrderType::Limit, 1768033484123456789));
 
         // Verify Layout: Bids are Ascending [98, 100]. 
         // pop() takes from the end, so it should take $100 first.
@@ -375,7 +376,7 @@ mod tests {
         // 2. Market Sell comes in (Qty 15)
         // Expectation: It should hit the Best Bid ($100) first (eats 10),
         // then hit the Next Best Bid ($98) (eats 5).
-        ob.add_order(new_order(3, 0, 15, Side::Ask, OrderType::Market));
+        ob.add_order(new_order(3, 0, 15, Side::Ask, OrderType::Market, 1768033584123456789));
 
         // Check: The $100 Bid should be fully consumed (Popped).
         // Only 1 bid level remains.
@@ -389,7 +390,7 @@ mod tests {
         // 3. Huge Market Sell (Qty 1000)
         // Expectation: Consumes the remaining 15 units at $98.
         // The rest of the sell order (985 qty) is Killed immediately (IOC).
-        ob.add_order(new_order(4, 0, 1000, Side::Ask, OrderType::Market));
+        ob.add_order(new_order(4, 0, 1000, Side::Ask, OrderType::Market, 1768033585123456789));
 
         // Check: Orderbook should be completely empty.
         assert_eq!(ob.bids.len(), 0);

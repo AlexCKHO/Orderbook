@@ -18,7 +18,7 @@ pub struct Order {
     pub qty: u64,
     pub side: Side,
     pub order_type: OrderType,
-
+    pub timestamp: i64
 }
 
 #[derive(Debug, Clone)]
