@@ -157,10 +157,28 @@ impl OrderBook {
 
             if best_bid.qty > new_ask_order.qty {
                 best_bid.qty -= new_ask_order.qty;
+
+                events.push(MatchEvent::TradeExecuted {
+                    maker_id: best_bid.id,
+                    taker_id: new_ask_order.id,
+                    price: best_bid.price,
+                    qty: new_ask_order.qty,
+                    timestamp: new_ask_order.timestamp,
+                });
+
                 new_ask_order.qty = 0;
                 break;
             } else {
                 new_ask_order.qty -= best_bid.qty;
+
+                events.push(MatchEvent::TradeExecuted {
+                    maker_id: best_bid.id,
+                    taker_id: new_ask_order.id,
+                    price: best_bid.price,
+                    qty: best_bid.qty,
+                    timestamp: new_ask_order.timestamp,
+                });
+
                 self.bids.pop();
             }
         }
@@ -170,10 +188,10 @@ impl OrderBook {
         // Standard Immediate-Or-Cancel approach
 
         if new_ask_order.qty > 0 {
-            println!(
-                "Market Order partially filled. Remaining {} qty killed.",
-                new_ask_order.qty
-            );
+            events.push(MatchEvent::OrderKilled {
+                id: new_ask_order.id,
+                killed_qty: new_ask_order.qty,
+            })
         }
     }
 
