@@ -8,24 +8,27 @@ struct OrderBook {
 }
 
 impl OrderBook {
-    fn add_order(&mut self, order: Order) {
+    fn add_order(&mut self, order: Order) -> Vec<MatchEvent> {
+        let mut events = Vec::new();
         if order.order_type == OrderType::Limit {
             if order.side == Side::Bid {
-                self.match_new_limit_bid(order);
+                self.match_new_limit_bid(order, &mut events);
             } else if order.side == Side::Ask {
-                self.match_new_limit_ask(order);
+                self.match_new_limit_ask(order, &mut events);
             }
         } else if order.order_type == OrderType::Market {
             if order.side == Side::Bid {
-                self.match_new_market_bid(order);
+                self.match_new_market_bid(order, &mut events);
             } else if order.side == Side::Ask {
-                self.match_new_market_ask(order);
+                self.match_new_market_ask(order, &mut events);
             }
         }
+
+        return events;
     }
 
     // When people are buying
-    fn match_new_limit_bid(&mut self, mut new_bid_order: Order, event: &mut Vec<MatchEvent>) {
+    fn match_new_limit_bid(&mut self, mut new_bid_order: Order, events: &mut Vec<MatchEvent>) {
         // Loop until:
         // 1. Finish matching new_bid_order.qty == 0
         // 2. Asks is empty
@@ -45,16 +48,33 @@ impl OrderBook {
             if best_ask.qty > new_bid_order.qty {
                 best_ask.qty -= new_bid_order.qty;
 
+                events.push(MatchEvent::TradeExecuted {
+                    maker_id: best_ask.id,
+                    taker_id: new_bid_order.id,
+                    price: best_ask.price,
+                    qty: new_bid_order.qty,
+                    timestamp: new_bid_order.timestamp,
+                });
+
                 new_bid_order.qty = 0;
             } else {
                 // For == and <, all need to pop
                 new_bid_order.qty -= best_ask.qty;
+
+                events.push(MatchEvent::TradeExecuted {
+                    maker_id: best_ask.id,
+                    taker_id: new_bid_order.id,
+                    price: best_ask.price,
+                    qty: best_ask.qty,
+                    timestamp: new_bid_order.timestamp,
+                });
+
                 self.asks.pop();
             }
         }
 
         if new_bid_order.qty > 0 {
-            self.add_order_to_bids(new_bid_order)
+            self.add_order_to_bids(new_bid_order, events);
         }
     }
 
@@ -79,15 +99,33 @@ impl OrderBook {
 
             if best_bid.qty > new_ask_order.qty {
                 best_bid.qty -= new_ask_order.qty;
+
+                events.push(MatchEvent::TradeExecuted {
+                    maker_id: best_bid.id,
+                    taker_id: new_ask_order.id,
+                    price: new_ask_order.price,
+                    qty: new_ask_order.qty,
+                    timestamp: new_ask_order.timestamp,
+                });
+
                 new_ask_order.qty = 0;
             } else {
                 new_ask_order.qty -= best_bid.qty;
+
+                events.push(MatchEvent::TradeExecuted {
+                    maker_id: best_bid.id,
+                    taker_id: new_ask_order.id,
+                    price: new_ask_order.price,
+                    qty: best_bid.qty,
+                    timestamp: new_ask_order.timestamp,
+                });
+
                 self.bids.pop();
             }
         }
 
         if new_ask_order.qty > 0 {
-            self.add_order_to_asks(new_ask_order)
+            self.add_order_to_asks(new_ask_order, events);
         }
     }
 
