@@ -1,7 +1,7 @@
 use crate::models::events::MatchEvent;
 use crate::models::order::{Order, OrderEntry, OrderType, Side};
 
-struct OrderBook {
+pub struct OrderBook {
     // FIFO;
     bids: Vec<OrderEntry>,
     asks: Vec<OrderEntry>,

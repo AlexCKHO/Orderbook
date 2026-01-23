@@ -1,3 +1,3 @@
 pub mod order;
-mod orderBook;
+pub mod order_book;
 mod events;
