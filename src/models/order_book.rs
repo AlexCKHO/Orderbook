@@ -1,10 +1,10 @@
 use crate::models::events::MatchEvent;
 use crate::models::order::{Order, OrderEntry, OrderType, Side};
-
+// Note: Orderbook on Tokio Integrating Sync Logic with Async Runtime
 pub struct OrderBook {
     // FIFO;
-    bids: Vec<OrderEntry>,
-    asks: Vec<OrderEntry>,
+    pub bids: Vec<OrderEntry>,
+    pub asks: Vec<OrderEntry>,
 }
 
 impl OrderBook {
