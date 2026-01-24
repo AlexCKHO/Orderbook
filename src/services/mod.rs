@@ -1,1 +1,1 @@
-mod matching_engine_service;
+pub mod matching_engine_service;
