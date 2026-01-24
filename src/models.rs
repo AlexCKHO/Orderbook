@@ -1,3 +1,3 @@
 pub mod order;
 pub mod order_book;
-mod events;
+pub(crate) mod events;
