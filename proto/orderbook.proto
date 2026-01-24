@@ -1,0 +1,75 @@
+syntax = "proto3";
+package orderbook;
+
+// 1. Basic Enum Definitions
+enum Side {
+  BID = 0;
+  ASK = 1;
+}
+
+enum OrderType {
+  LIMIT = 0;
+  MARKET = 1;
+}
+
+// 2. Input: Order Request
+message OrderRequest {
+  uint64 id = 1;
+  uint64 price = 2;
+  uint64 qty = 3;
+  Side side = 4;
+  OrderType order_type = 5; // Recommendation: use snake_case
+  int64 timestamp = 6;      // Client dispatch time (for reference)
+}
+
+// 3. Output Events: Various events that occurred
+message OrderPlaced {
+  uint64 id = 1;
+  uint64 price = 2;
+  uint64 qty = 3;
+  Side side = 4;
+}
+
+message TradeExecuted {
+  uint64 maker_id = 1;
+  uint64 taker_id = 2;
+  uint64 price = 3;
+  uint64 qty = 4;
+  int64 timestamp = 5;
+}
+
+message OrderCancelled {
+  uint64 id = 1;
+  uint64 cancelled_qty = 2;
+}
+
+message OrderKilled {
+  uint64 id = 1;
+  uint64 killed_qty = 2;
+}
+
+// 4. Wrapper: Event Wrapper (This is key!)
+// Since a List cannot hold different types, we must use a Wrapper to encapsulate them
+// oneof represents "can only be one of the following"
+message MatchEvent {
+  oneof event_data {
+    OrderPlaced placed = 1;
+    TradeExecuted filled = 2;
+    OrderCancelled cancelled = 3;
+    OrderKilled killed = 4;
+  }
+}
+
+// 5. Final Response
+// This contains a List (repeated) holding the Wrappers defined above
+message OrderResponse {
+  bool success = 1;
+  //TODO: remove after dev phrase
+  string message = 2;
+  repeated MatchEvent events = 3; // <--- Key point here
+}
+
+// 6. Service Definition
+service MatchingEngine {
+  rpc PlaceOrder (OrderRequest) returns (OrderResponse);
+}

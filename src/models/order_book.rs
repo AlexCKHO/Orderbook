@@ -3,12 +3,21 @@ use crate::models::order::{Order, OrderEntry, OrderType, Side};
 // Note: Orderbook on Tokio Integrating Sync Logic with Async Runtime
 pub struct OrderBook {
     // FIFO;
-    pub bids: Vec<OrderEntry>,
-    pub asks: Vec<OrderEntry>,
+     bids: Vec<OrderEntry>,
+     asks: Vec<OrderEntry>,
 }
 
 impl OrderBook {
-    fn add_order(&mut self, order: Order) -> Vec<MatchEvent> {
+    
+    pub fn new() -> Self {  
+        OrderBook {
+            // bids: Vec::new(),
+            // asks: Vec::new(),
+            bids: Vec::<OrderEntry>::new(),
+            asks: Vec::<OrderEntry>::new(),
+        }
+    }
+    pub fn add_order(&mut self, order: Order) -> Vec<MatchEvent> {
         let mut events = Vec::new();
         if order.order_type == OrderType::Limit {
             if order.side == Side::Bid {
