@@ -3,13 +3,15 @@ package orderbook;
 
 // 1. Basic Enum Definitions
 enum Side {
-  BID = 0;
-  ASK = 1;
+  SIDE_UNSPECIFIED = 0;
+  BID = 1;
+  ASK = 2;
 }
 
 enum OrderType {
-  LIMIT = 0;
-  MARKET = 1;
+  ORDERTYPE_UNSPECIFIED = 0;
+  LIMIT = 1;
+  MARKET = 2;
 }
 
 // 2. Input: Order Request

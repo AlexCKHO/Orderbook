@@ -43,16 +43,24 @@ impl MatchingEngine for MatchingEngineService {
 
         // --- B. Validation & Conversion (Proto -> Internal) ---
         let side = match req.side {
-            0 => Side::Bid,
-            1 => Side::Ask,
+            1 => Side::Bid,
+            2 => Side::Ask,
             _ => return Err(Status::invalid_argument("Invalid side")),
         };
 
         let order_type = match req.order_type {
-            0 => OrderType::Limit,
-            1 => OrderType::Market,
+            1 => OrderType::Limit,
+            2 => OrderType::Market,
             _ => return Err(Status::invalid_argument("Invalid order type")),
         };
+
+        if req.qty <= 0 {
+            return Err(Status::invalid_argument("Quantity must be > 0"));
+        }
+
+        if order_type == OrderType::Limit && req.price <= 0 {
+            return Err(Status::invalid_argument("Price must be > 0 for Limit Order"));
+        }
 
         let order = Order {
             id: req.id,
@@ -78,7 +86,10 @@ impl MatchingEngine for MatchingEngineService {
                         id,
                         price,
                         qty,
-                        side: side as i32, // Rust Enum -> i32
+                        side: match side {
+                            Side::Bid => 1,
+                            Side::Ask => 2,
+                        }
                     })
                 },
 
