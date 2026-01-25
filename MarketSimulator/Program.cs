@@ -1,100 +1,126 @@
-﻿using System.Diagnostics;
+﻿using System.Collections.Concurrent; // 👈 必須引用這個！
+using System.Diagnostics;
+using Grpc.Core;
 using Grpc.Net.Client;
-using Orderbook;
+using Orderbook; // 你的 Namespace
 
 namespace MarketSimulator;
 
 class Program
 {
-    private const int TotalOrders = 10000;
+    private const int TotalOrders = 50000; 
     private const string Address = "http://127.0.0.1:50051";
 
     static async Task Main(string[] args)
     {
-        // 1. Establish Connection
-        using var channel = GrpcChannel.ForAddress(Address);
+        // 1. 設定連線
+        // Mac/Linux 需要 HttpClientHandler 來支援 http2 without SSL
+        var httpHandler = new HttpClientHandler();
+        // httpHandler.ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
+        
+        using var channel = GrpcChannel.ForAddress(Address, new GrpcChannelOptions { HttpHandler = httpHandler });
         var client = new MatchingEngine.MatchingEngineClient(channel);
 
-        Console.WriteLine("💣 HFT Stress Test Client Ready.");
-        Console.WriteLine($"🎯 Target: {TotalOrders} orders.");
-        Console.WriteLine("Press ENTER to launch the attack...");
+        // 2. 預先準備數據 (Zero Allocation during test)
+        Console.WriteLine($"⚡ Pre-generating {TotalOrders} orders...");
+        var requests = Enumerable.Range(0, TotalOrders).Select(i => GenerateRandomOrder(i)).ToArray();
+        
+        // 🔥 3. 修正：在此宣告 latencies (ConcurrentDictionary)
+        // Key: RequestId (ulong), Value: StartTimestamp (long)
+        var latencies = new ConcurrentDictionary<ulong, long>();
+
+        Console.WriteLine($"🔥 [STREAMING MODE] Ready to blast {TotalOrders} orders...");
+        Console.WriteLine("Press ENTER to start...");
         Console.ReadLine();
 
-        // 2. Start the timer
-        Console.WriteLine("🚀 Launching sequence started...");
-        var stopwatch = Stopwatch.StartNew();
-
+        var sw = Stopwatch.StartNew();
         int successCount = 0;
-        int errorCount = 0;
 
-        // 3. Machine Gun mode (Parallel.ForEachAsync)
-        // Start multiple threads to send order request to rust service
+        // 4. 開啟雙向流 (Stream)
+        using var call = client.PlaceOrderStream();
 
-        await Parallel.ForEachAsync(Enumerable.Range(0, TotalOrders),
-            new ParallelOptions { MaxDegreeOfParallelism = 20 },
-            async (i, ct) =>
+        // 5. 接收端任務 (Receiver Task)
+        // 使用 (Func<Task>) 強制轉型解決 Task.Run 歧義
+        var responseReaderTask = Task.Run((Func<Task>)(async () =>
+        {
+            // ReadAllAsync 需要 .NET Core 3.0+
+            await foreach (var response in call.ResponseStream.ReadAllAsync())
             {
-                try
+                // 注意：這裡假設你 Proto 已經加了 request_id，C# 生成出來就是 RequestId
+                if (latencies.TryGetValue(response.RequestId, out long startTime))
                 {
-                    // Randomly generate orders 
-                    var request = GenerateRandomOrder(i);
-
-                    var reply = await client.PlaceOrderAsync(request);
-
-                    if (reply.Success)
-                    {
-                        Interlocked.Increment(ref successCount);
-                    }
-                    else
-                    {
-                        Interlocked.Increment(ref errorCount);
-                    }
+                    long endTime = Stopwatch.GetTimestamp();
+                    // 計算 Latency 並更新 Value (存成時間差 ms)
+                    // 使用 double 運算保持精度
+                    long elapsedTicks = endTime - startTime;
+                    double ms = (double)elapsedTicks / Stopwatch.Frequency * 1000;
+                    
+                    latencies[response.RequestId] = (long)ms; 
                 }
-                catch (Exception e)
-                {
-                    Interlocked.Increment(ref errorCount);
-                }
+                Interlocked.Increment(ref successCount);
+            }
+        }));
 
-                // Progress bar for each 1000 orders
-                if (i % 100 == 0 && i > 0)
-                {
-                    Console.Write(".");
-                }
-            });
+        // 6. 發送端任務 (Sender Loop)
+        foreach (var req in requests)
+        {
+            // 記錄開始時間 (Raw Ticks)
+            latencies[req.Id] = Stopwatch.GetTimestamp();
+            
+            // 寫入 Stream
+            await call.RequestStream.WriteAsync(req);
+        }
 
-        stopwatch.Stop();
+        // 7. 告訴 Server：我射完喇 (Complete)
+        await call.RequestStream.CompleteAsync();
 
-        // 4. Reporting Performance
-        Console.WriteLine("\n\n=========================================");
-        Console.WriteLine($"⏱️  Time Taken:   {stopwatch.Elapsed.TotalMilliseconds} ms");
-        Console.WriteLine($"✅ Successful:   {successCount}");
-        Console.WriteLine($"❌ Failed:       {errorCount}");
-        Console.WriteLine("=========================================");
+        // 8. 等待接收端收完所有回覆
+        await responseReaderTask;
+        
+        sw.Stop();
 
-        // TPS (Transactions Per Second)
-        double tps = TotalOrders / stopwatch.Elapsed.TotalSeconds;
-        Console.WriteLine($"⚡ TPS (Speed):  {tps:N0} orders/second");
-        Console.WriteLine("=========================================");
+        // 9. 打印報告
+        // 只取 Values (已經變成 Latency ms 了)
+        PrintReport(sw, latencies.Values.ToArray(), successCount);
     }
 
     private static OrderRequest GenerateRandomOrder(int index)
-    {   
-        
-        var side = Random.Shared.Next(0, 2) == 0 ? Side.Bid : Side.Ask;
-
-        var price = Random.Shared.Next(100, 201);
-        
-        var now = DateTimeOffset.UtcNow;
-        long unixNanoseconds = (now.Ticks - DateTime.UnixEpoch.Ticks) * 100;
-
+    {
         return new OrderRequest
         {
-            Id = (ulong)(10000 + index),
-            Price = (ulong)price,
+            Id = (ulong)(200000 + index), // 確保 ID 不重複
+            Price = (ulong)Random.Shared.Next(100, 201),
             Qty = (ulong)Random.Shared.Next(1, 100),
-            Side = side,
+            Side = Random.Shared.Next(0, 2) == 0 ? Side.Bid : Side.Ask,
             OrderType = OrderType.Limit,
-            Timestamp = unixNanoseconds
+            Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
         };
+    }
+
+    private static void PrintReport(Stopwatch sw, long[] latencyValues, int success)
+    {
+        // 過濾掉還沒計算完的 (值還是極大的 Timestamp) 或者異常值
+        // 這裡我們簡單過濾 > 0 且 < 10000ms (假設)
+        var sorted = latencyValues.Where(x => x >= 0 && x < 10000).OrderBy(x => x).ToArray();
+        
+        double tps = success / sw.Elapsed.TotalSeconds;
+
+        Console.WriteLine("\n🚀 STREAMING RESULT:");
+        Console.WriteLine($"⏱️ Total Time: {sw.ElapsedMilliseconds}ms");
+        Console.WriteLine($"⚡ TPS: {tps:N0} orders/sec");
+        Console.WriteLine($"✅ Success: {success}");
+        
+        if (sorted.Length > 0)
+        {
+            Console.WriteLine("📊 Latency Distribution:");
+            Console.WriteLine($"   p50 (Median): {sorted[sorted.Length / 2]} ms");
+            Console.WriteLine($"   p95:          {sorted[(int)(sorted.Length * 0.95)]} ms");
+            Console.WriteLine($"   p99:          {sorted[(int)(sorted.Length * 0.99)]} ms");
+            Console.WriteLine($"   Max:          {sorted.Last()} ms");
+        }
+        else 
+        {
+             Console.WriteLine("⚠️ No latency data collected. Check if RequestId is matching.");
+        }
     }
 }
