@@ -6,7 +6,7 @@ namespace MarketSimulator;
 
 class Program
 {
-    private const int TotalOrders = 10000;
+    private const int TotalOrders = 50000;
     private const string Address = "http://127.0.0.1:50051";
 
     static async Task Main(string[] args)
