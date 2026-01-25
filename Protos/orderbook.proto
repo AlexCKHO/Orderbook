@@ -74,5 +74,6 @@ message OrderResponse {
 
 // 6. Service Definition
 service MatchingEngine {
+ rpc PlaceOrder (OrderRequest) returns (OrderResponse);
  rpc PlaceOrderStream (stream OrderRequest) returns (stream OrderResponse);
 }
