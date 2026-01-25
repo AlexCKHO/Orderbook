@@ -69,9 +69,10 @@ message OrderResponse {
   //TODO: remove after dev phrase
   string message = 2;
   repeated MatchEvent events = 3; // <--- Key point here
+  uint64 request_id = 4;
 }
 
 // 6. Service Definition
 service MatchingEngine {
-  rpc PlaceOrder (OrderRequest) returns (OrderResponse);
+ rpc PlaceOrderStream (stream OrderRequest) returns (stream OrderResponse);
 }
