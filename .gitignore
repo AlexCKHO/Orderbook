@@ -1,29 +1,39 @@
-# --- Rust Essentials ---
-# The build directory (equivalent to /bin and /obj in C#)
-/target/
+# ===========================
+# Rust Ignored Files
+# ===========================
+# Critical Fix: Removed leading "/" to ensure target/ folders in subdirectories are ignored
+target/
 
-# Backup files (optional, but good to have)
+# Backup files
 **/*.rs.bk
 
-# --- RustRover / JetBrains IDE ---
-# Project settings and workspace preferences
-.idea/
-*.iml
-
-# --- Operating System Files ---
-# Mac
-.DS_Store
-# Windows
-Thumbs.db
-
-*.suo
-*.user
-.vs/
+# ===========================
+# C# / .NET Ignored Files
+# ===========================
+# Ignore compiled Binary and Object files (in any directory depth)
 [Bb]in/
 [Oo]bj/
+
+# Visual Studio / Rider user-specific configuration files (should not be uploaded)
+.vs/
+*.user
+*.suo
 _UpgradeReport_Files/
 [Pp]ackages/
 
+# ===========================
+# IDE Settings (Rider / VS Code)
+# ===========================
+.idea/
+*.iml
+.vscode/
+
+# ===========================
+# Operating System Files
+# ===========================
+# Mac
+.DS_Store
+
+# Windows
 Thumbs.db
 Desktop.ini
-.DS_Store
