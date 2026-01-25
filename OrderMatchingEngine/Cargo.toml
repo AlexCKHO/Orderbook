@@ -3,6 +3,11 @@ name = "OrderMatching"
 version = "0.1.0"
 edition = "2024"
 
+[dev-dependencies]
+criterion = "0.5"
+rand = "0.8"
+tokio = { version = "1", features = ["full"] }
+
 [dependencies]
 tonic = "0.12"           # gRPC Server framework
 prost = "0.13"           # handle Protobuf data

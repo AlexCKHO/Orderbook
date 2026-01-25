@@ -222,3 +222,61 @@ impl MatchingEngine for MatchingEngineService {
         Ok(Response::new(Box::pin(out_stream) as Self::PlaceOrderStreamStream))
     }
 }
+
+
+
+#[cfg(test)]
+mod performance_tests {
+    use super::*;
+    use std::time::Instant;
+    use rand::Rng;
+
+    // 1:1 復刻你 C# 的 Random Order Logic
+    fn generate_random_request(index: u64) -> OrderRequest {
+        let mut rng = rand::thread_rng();
+        OrderRequest {
+            id: 1_000_000 + index,
+            price: rng.gen_range(100..201),      // C# Random.Shared.Next(100, 201)
+            qty: rng.gen_range(1..100),         // C# Random.Shared.Next(1, 100)
+            side: if rng.gen_bool(0.5) { 1 } else { 2 }, // 1=Bid, 2=Ask
+            order_type: 1,                      // Limit Order
+            // Note: Timestamp 喺 _process_order 入面會重新攞 Server Time，所以呢度求其填
+            timestamp: 0,
+        }
+    }
+
+    #[tokio::test]
+    async fn bench_local_engine_performance() {
+        let service = MatchingEngineService::new();
+        let iterations = 100_000; // 跑 10 萬張單睇下點
+        let mut requests = Vec::with_capacity(iterations);
+
+        // 1. 預先生成數據 (唔計入 Matching 時間)
+        for i in 0..iterations as u64 {
+            requests.push(generate_random_request(i));
+        }
+
+        println!("🚀 Starting Performance Test with {} orders...", iterations);
+
+        // 2. 開始計時
+        let start = Instant::now();
+
+        for req in requests {
+            // 直接 Call 你的 Helper Function
+            let _ = service._process_order(req).await.unwrap();
+        }
+
+        let duration = start.elapsed();
+
+        // 3. 計算結果
+        let tps = (iterations as f64 / duration.as_secs_f64()) as u64;
+        let avg_latency = duration.as_nanos() / iterations as u128;
+
+        println!("-------------------------------------------");
+        println!("🏁 Results:");
+        println!("⏱️  Total Time: {:?}", duration);
+        println!("📈 Throughput: {} TPS (Orders per second)", tps);
+        println!("📉 Avg Latency: {} ns per order", avg_latency);
+        println!("-------------------------------------------");
+    }
+}
