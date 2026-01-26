@@ -4,10 +4,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::Mutex;
 use tonic::{Request, Response, Status, Streaming};
 
-// 🔥 Stream 相關引用
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
-use tokio_stream::StreamExt; // 讓 stream 有 .next() / .message()
+use tokio_stream::StreamExt;
 use std::pin::Pin;
 use futures::Stream;
 
@@ -117,7 +116,7 @@ impl MatchingEngineService {
 #[tonic::async_trait]
 impl MatchingEngine for MatchingEngineService {
 
-   // 1. 單次請求 (保留兼容性)
+    // 1. 單次請求 (保留兼容性)
     async fn place_order(
         &self,
         request: Request<OrderRequest>,

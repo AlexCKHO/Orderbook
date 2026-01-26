@@ -8,7 +8,7 @@ namespace MarketSimulator;
 
 class Program
 {
-    // 🔥 加大到 30 萬張單，確保測試時間夠長
+    // 🔥 Increased to 300,000 orders to ensure the test duration is sufficient
     private const int TotalOrders = 300_000; 
     private const string Address = "http://127.0.0.1:50051";
 
@@ -18,16 +18,16 @@ class Program
         using var channel = GrpcChannel.ForAddress(Address, new GrpcChannelOptions { HttpHandler = httpHandler });
         var client = new MatchingEngine.MatchingEngineClient(channel);
 
-        // 1. 生成數據 (Zero Allocation)
+        // 1. Data Generation (Zero Allocation approach)
         Console.WriteLine($"⚡ Pre-generating {TotalOrders} orders...");
         var requests = Enumerable.Range(0, TotalOrders).Select(i => GenerateRandomOrder(i)).ToArray();
         
-        // 為了避免 Memory 爆，我們只抽樣記錄 Latency (每 100 張記一次)
+        // To prevent memory exhaustion, we only sample latency (recording once every 100 orders)
         // Key: RequestId
         var latencies = new ConcurrentDictionary<ulong, long>();
 
         // ==========================================
-        // 🔥 WARM UP PHASE (暖身階段)
+        // 🔥 WARM UP PHASE
         // ==========================================
         Console.WriteLine("🏃 Warming up engine (sending 1000 orders)...");
         await RunTest(client, requests.Take(1000).ToArray(), null); // Pass null to skip recording
@@ -38,7 +38,7 @@ class Program
         Console.WriteLine("========================================");
         
         // ==========================================
-        // 🚀 REAL TEST PHASE (真測試)
+        // 🚀 REAL TEST PHASE
         // ==========================================
         await RunTest(client, requests, latencies);
     }
@@ -54,11 +54,12 @@ class Program
         {
             await foreach (var response in call.ResponseStream.ReadAllAsync())
             {
-                // 只在真測試期間記錄 Latency
+                // Only record Latency during the real test phase
                 if (latencies != null && latencies.TryGetValue(response.RequestId, out long startTime))
                 {
                     long endTime = Stopwatch.GetTimestamp();
                     long elapsedTicks = endTime - startTime;
+                    // Calculate elapsed time in milliseconds
                     latencies[response.RequestId] = (long)((double)elapsedTicks / Stopwatch.Frequency * 1000);
                 }
                 Interlocked.Increment(ref successCount);
@@ -70,8 +71,8 @@ class Program
         {
             if (latencies != null)
             {
-                // 我們只記錄一部分 Latency 以節省 Client 端 CPU (Sampling)
-                // 否則 Dictionary 太大會影響測試準確度
+                // We only record a subset of latencies to save Client-side CPU (Sampling)
+                // Otherwise, the Dictionary size would impact test accuracy
                 if (req.Id % 100 == 0) 
                 {
                     latencies[req.Id] = Stopwatch.GetTimestamp();
@@ -104,6 +105,7 @@ class Program
 
     private static void PrintReport(Stopwatch sw, long[] latencyValues, int success)
     {
+        // Filter out outliers/invalid data and sort for percentile calculation
         var sorted = latencyValues.Where(x => x >= 0 && x < 10000).OrderBy(x => x).ToArray();
         double tps = success / sw.Elapsed.TotalSeconds;
 
