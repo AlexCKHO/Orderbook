@@ -1,4 +1,6 @@
-﻿using System.Diagnostics;
+﻿using System.Collections.Concurrent;
+using System.Diagnostics;
+using Grpc.Core;
 using Grpc.Net.Client;
 using Orderbook;
 
@@ -6,95 +8,115 @@ namespace MarketSimulator;
 
 class Program
 {
-    private const int TotalOrders = 50000;
+    // Increased to 300k orders to ensure the test duration is long enough
+    private const int TotalOrders = 300_000; 
     private const string Address = "http://127.0.0.1:50051";
 
     static async Task Main(string[] args)
     {
-        // 1. Establish Connection
-        using var channel = GrpcChannel.ForAddress(Address);
+        var httpHandler = new HttpClientHandler();
+        using var channel = GrpcChannel.ForAddress(Address, new GrpcChannelOptions { HttpHandler = httpHandler });
         var client = new MatchingEngine.MatchingEngineClient(channel);
 
-        Console.WriteLine("💣 HFT Stress Test Client Ready.");
-        Console.WriteLine($"🎯 Target: {TotalOrders} orders.");
-        Console.WriteLine("Press ENTER to launch the attack...");
-        Console.ReadLine();
+        // 1. Generate Data (Zero Allocation)
+        Console.WriteLine($"⚡ Pre-generating {TotalOrders} orders...");
+        var requests = Enumerable.Range(0, TotalOrders).Select(i => GenerateRandomOrder(i)).ToArray();
+        
+        // To prevent memory bloat, we only record sampled Latency (e.g., every 100th order)
+        // Key: RequestId
+        var latencies = new ConcurrentDictionary<ulong, long>();
 
-        // 2. Start the timer
-        Console.WriteLine("🚀 Launching sequence started...");
-        var stopwatch = Stopwatch.StartNew();
+        // ==========================================
+        //  WARM UP PHASE 
+        // ==========================================
+        Console.WriteLine("🏃 Warming up engine (sending 1000 orders)...");
+        await RunTest(client, requests.Take(1000).ToArray(), null); // Pass null to skip recording
+        Console.WriteLine("✅ Warm up complete. Engine is HOT.");
+        
+        Console.WriteLine("\n========================================");
+        Console.WriteLine($"🔥 [REAL TEST] Blasting {TotalOrders} orders...");
+        Console.WriteLine("========================================");
+        
+        // ==========================================
+        //  REAL TEST PHASE 
+        // ==========================================
+        await RunTest(client, requests, latencies);
+    }
 
+    private static async Task RunTest(MatchingEngine.MatchingEngineClient client, OrderRequest[] orders, ConcurrentDictionary<ulong, long>? latencies)
+    {
+        var sw = Stopwatch.StartNew();
         int successCount = 0;
-        int errorCount = 0;
+        using var call = client.PlaceOrderStream();
 
-        // 3. Machine Gun mode (Parallel.ForEachAsync)
-        // Start multiple threads to send order request to rust service
-
-        await Parallel.ForEachAsync(Enumerable.Range(0, TotalOrders),
-            new ParallelOptions { MaxDegreeOfParallelism = 20 },
-            async (i, ct) =>
+        // Receiver Task
+        var reader = Task.Run(async () =>
+        {
+            await foreach (var response in call.ResponseStream.ReadAllAsync())
             {
-                try
+                // Only record Latency during the real test phase
+                if (latencies != null && latencies.TryGetValue(response.RequestId, out long startTime))
                 {
-                    // Randomly generate orders 
-                    var request = GenerateRandomOrder(i);
-
-                    var reply = await client.PlaceOrderAsync(request);
-
-                    if (reply.Success)
-                    {
-                        Interlocked.Increment(ref successCount);
-                    }
-                    else
-                    {
-                        Interlocked.Increment(ref errorCount);
-                    }
+                    long endTime = Stopwatch.GetTimestamp();
+                    long elapsedTicks = endTime - startTime;
+                    // Convert ticks to milliseconds
+                    latencies[response.RequestId] = (long)((double)elapsedTicks / Stopwatch.Frequency * 1000);
                 }
-                catch (Exception e)
+                Interlocked.Increment(ref successCount);
+            }
+        });
+
+        // Sender Loop
+        foreach (var req in orders)
+        {
+            if (latencies != null)
+            {
+                // We only record a portion of Latency to save Client-side CPU (Sampling)
+                // Otherwise, the Dictionary size would affect test accuracy
+                if (req.Id % 100 == 0) 
                 {
-                    Interlocked.Increment(ref errorCount);
+                    latencies[req.Id] = Stopwatch.GetTimestamp();
                 }
+            }
+            await call.RequestStream.WriteAsync(req);
+        }
+        await call.RequestStream.CompleteAsync();
+        await reader;
+        sw.Stop();
 
-                // Progress bar for each 1000 orders
-                if (i % 100 == 0 && i > 0)
-                {
-                    Console.Write(".");
-                }
-            });
-
-        stopwatch.Stop();
-
-        // 4. Reporting Performance
-        Console.WriteLine("\n\n=========================================");
-        Console.WriteLine($"⏱️  Time Taken:   {stopwatch.Elapsed.TotalMilliseconds} ms");
-        Console.WriteLine($"✅ Successful:   {successCount}");
-        Console.WriteLine($"❌ Failed:       {errorCount}");
-        Console.WriteLine("=========================================");
-
-        // TPS (Transactions Per Second)
-        double tps = TotalOrders / stopwatch.Elapsed.TotalSeconds;
-        Console.WriteLine($"⚡ TPS (Speed):  {tps:N0} orders/second");
-        Console.WriteLine("=========================================");
+        if (latencies != null)
+        {
+            PrintReport(sw, latencies.Values.ToArray(), successCount);
+        }
     }
 
     private static OrderRequest GenerateRandomOrder(int index)
-    {   
-        
-        var side = Random.Shared.Next(0, 2) == 0 ? Side.Bid : Side.Ask;
-
-        var price = Random.Shared.Next(100, 201);
-        
-        var now = DateTimeOffset.UtcNow;
-        long unixNanoseconds = (now.Ticks - DateTime.UnixEpoch.Ticks) * 100;
-
+    {
         return new OrderRequest
         {
-            Id = (ulong)(10000 + index),
-            Price = (ulong)price,
+            Id = (ulong)(1000000 + index),
+            Price = (ulong)Random.Shared.Next(100, 201),
             Qty = (ulong)Random.Shared.Next(1, 100),
-            Side = side,
+            Side = Random.Shared.Next(0, 2) == 0 ? Side.Bid : Side.Ask,
             OrderType = OrderType.Limit,
-            Timestamp = unixNanoseconds
+            Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
         };
+    }
+
+    private static void PrintReport(Stopwatch sw, long[] latencyValues, int success)
+    {
+        // Filter out anomalies and sort for percentile calculation
+        var sorted = latencyValues.Where(x => x >= 0 && x < 10000).OrderBy(x => x).ToArray();
+        double tps = success / sw.Elapsed.TotalSeconds;
+
+        Console.WriteLine($"⏱️ Total Time: {sw.ElapsedMilliseconds}ms");
+        Console.WriteLine($"⚡ TPS: {tps:N0} orders/sec");
+        
+        if (sorted.Length > 0)
+        {
+            Console.WriteLine($"📊 Latency (Sampled {sorted.Length} orders):");
+            Console.WriteLine($"   p50: {sorted[sorted.Length / 2]} ms");
+            Console.WriteLine($"   p99: {sorted[(int)(sorted.Length * 0.99)]} ms");
+        }
     }
 }
