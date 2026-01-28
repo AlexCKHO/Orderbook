@@ -8,8 +8,8 @@ namespace MarketSimulator;
 
 class Program
 {
-    // Increased to 300k orders to ensure the test duration is long enough
-    private const int TotalOrders = 300_000; 
+    private const int TotalOrders = 500_000; // Target: 500k orders
+    private const int BatchSize = 100;       // 100 per batch 
     private const string Address = "http://127.0.0.1:50051";
 
     static async Task Main(string[] args)
@@ -18,76 +18,49 @@ class Program
         using var channel = GrpcChannel.ForAddress(Address, new GrpcChannelOptions { HttpHandler = httpHandler });
         var client = new MatchingEngine.MatchingEngineClient(channel);
 
-        // 1. Generate Data (Zero Allocation)
+        // 1. Pre-generate data
         Console.WriteLine($"⚡ Pre-generating {TotalOrders} orders...");
-        var requests = Enumerable.Range(0, TotalOrders).Select(i => GenerateRandomOrder(i)).ToArray();
-        
-        // To prevent memory bloat, we only record sampled Latency (e.g., every 100th order)
-        // Key: RequestId
-        var latencies = new ConcurrentDictionary<ulong, long>();
+        var rawOrders = Enumerable.Range(0, TotalOrders).Select(i => GenerateRandomOrder(i)).ToArray();
 
-        // ==========================================
-        //  WARM UP PHASE 
-        // ==========================================
-        Console.WriteLine("🏃 Warming up engine (sending 1000 orders)...");
-        await RunTest(client, requests.Take(1000).ToArray(), null); // Pass null to skip recording
-        Console.WriteLine("✅ Warm up complete. Engine is HOT.");
-        
-        Console.WriteLine("\n========================================");
-        Console.WriteLine($"🔥 [REAL TEST] Blasting {TotalOrders} orders...");
-        Console.WriteLine("========================================");
-        
-        // ==========================================
-        //  REAL TEST PHASE 
-        // ==========================================
-        await RunTest(client, requests, latencies);
-    }
+        // 2. Chunk the data - LINQ Chunk is a .NET 6+ feature
+        Console.WriteLine($"📦 Batching into chunks of {BatchSize}...");
+        var batches = rawOrders.Chunk(BatchSize).Select(chunk => new OrderBatchRequest
+        {
+            Orders = { chunk } // Google Protobuf RepeatedField syntax
+        }).ToArray();
 
-    private static async Task RunTest(MatchingEngine.MatchingEngineClient client, OrderRequest[] orders, ConcurrentDictionary<ulong, long>? latencies)
-    {
+        Console.WriteLine($"Ready to blast {batches.Length} batches ({TotalOrders} orders)...");
+        Console.WriteLine("Press ENTER to destroy the engine...");
+        Console.ReadLine();
+
         var sw = Stopwatch.StartNew();
-        int successCount = 0;
-        using var call = client.PlaceOrderStream();
+        int processedCount = 0;
+
+        // 3. Use Batch Stream
+        using var call = client.PlaceBatchStream();
 
         // Receiver Task
         var reader = Task.Run(async () =>
         {
             await foreach (var response in call.ResponseStream.ReadAllAsync())
             {
-                // Only record Latency during the real test phase
-                if (latencies != null && latencies.TryGetValue(response.RequestId, out long startTime))
-                {
-                    long endTime = Stopwatch.GetTimestamp();
-                    long elapsedTicks = endTime - startTime;
-                    // Convert ticks to milliseconds
-                    latencies[response.RequestId] = (long)((double)elapsedTicks / Stopwatch.Frequency * 1000);
-                }
-                Interlocked.Increment(ref successCount);
+                // Since this is a Batch response, increment count by the amount the Server processed
+                Interlocked.Add(ref processedCount, (int)response.ProcessedCount);
             }
         });
 
-        // Sender Loop
-        foreach (var req in orders)
+        // Sender Loop (Sending Batches)
+        foreach (var batch in batches)
         {
-            if (latencies != null)
-            {
-                // We only record a portion of Latency to save Client-side CPU (Sampling)
-                // Otherwise, the Dictionary size would affect test accuracy
-                if (req.Id % 100 == 0) 
-                {
-                    latencies[req.Id] = Stopwatch.GetTimestamp();
-                }
-            }
-            await call.RequestStream.WriteAsync(req);
+            await call.RequestStream.WriteAsync(batch);
         }
         await call.RequestStream.CompleteAsync();
+        
+        // Wait for all responses
         await reader;
         sw.Stop();
 
-        if (latencies != null)
-        {
-            PrintReport(sw, latencies.Values.ToArray(), successCount);
-        }
+        PrintReport(sw, processedCount);
     }
 
     private static OrderRequest GenerateRandomOrder(int index)
@@ -103,20 +76,12 @@ class Program
         };
     }
 
-    private static void PrintReport(Stopwatch sw, long[] latencyValues, int success)
+    private static void PrintReport(Stopwatch sw, int count)
     {
-        // Filter out anomalies and sort for percentile calculation
-        var sorted = latencyValues.Where(x => x >= 0 && x < 10000).OrderBy(x => x).ToArray();
-        double tps = success / sw.Elapsed.TotalSeconds;
-
+        double tps = count / sw.Elapsed.TotalSeconds;
+        Console.WriteLine("\n🚀 BATCHING RESULT:");
         Console.WriteLine($"⏱️ Total Time: {sw.ElapsedMilliseconds}ms");
         Console.WriteLine($"⚡ TPS: {tps:N0} orders/sec");
-        
-        if (sorted.Length > 0)
-        {
-            Console.WriteLine($"📊 Latency (Sampled {sorted.Length} orders):");
-            Console.WriteLine($"   p50: {sorted[sorted.Length / 2]} ms");
-            Console.WriteLine($"   p99: {sorted[(int)(sorted.Length * 0.99)]} ms");
-        }
+        Console.WriteLine($"✅ Processed: {count}");
     }
 }

@@ -1,7 +1,7 @@
 syntax = "proto3";
 package orderbook;
 
-// 1. Basic Enum Definitions
+// --- Enums ---
 enum Side {
   SIDE_UNSPECIFIED = 0;
   BID = 1;
@@ -14,45 +14,27 @@ enum OrderType {
   MARKET = 2;
 }
 
-// 2. Input: Order Request
+// --- Request Models ---
 message OrderRequest {
   uint64 id = 1;
   uint64 price = 2;
   uint64 qty = 3;
   Side side = 4;
-  OrderType order_type = 5; // Recommendation: use snake_case
-  int64 timestamp = 6;      // Client dispatch time (for reference)
+  OrderType order_type = 5;
+  int64 timestamp = 6;
 }
 
-// 3. Output Events: Various events that occurred
-message OrderPlaced {
-  uint64 id = 1;
-  uint64 price = 2;
-  uint64 qty = 3;
-  Side side = 4;
+//  Batch Request 
+message OrderBatchRequest {
+  repeated OrderRequest orders = 1;
 }
 
-message TradeExecuted {
-  uint64 maker_id = 1;
-  uint64 taker_id = 2;
-  uint64 price = 3;
-  uint64 qty = 4;
-  int64 timestamp = 5;
-}
+// --- Event Models ---
+message OrderPlaced { uint64 id = 1; uint64 price = 2; uint64 qty = 3; Side side = 4; }
+message TradeExecuted { uint64 maker_id = 1; uint64 taker_id = 2; uint64 price = 3; uint64 qty = 4; int64 timestamp = 5; }
+message OrderCancelled { uint64 id = 1; uint64 cancelled_qty = 2; }
+message OrderKilled { uint64 id = 1; uint64 killed_qty = 2; }
 
-message OrderCancelled {
-  uint64 id = 1;
-  uint64 cancelled_qty = 2;
-}
-
-message OrderKilled {
-  uint64 id = 1;
-  uint64 killed_qty = 2;
-}
-
-// 4. Wrapper: Event Wrapper (This is key!)
-// Since a List cannot hold different types, we must use a Wrapper to encapsulate them
-// oneof represents "can only be one of the following"
 message MatchEvent {
   oneof event_data {
     OrderPlaced placed = 1;
@@ -62,18 +44,24 @@ message MatchEvent {
   }
 }
 
-// 5. Final Response
-// This contains a List (repeated) holding the Wrappers defined above
+// --- Response Models ---
 message OrderResponse {
   bool success = 1;
-  //TODO: remove after dev phrase
   string message = 2;
-  repeated MatchEvent events = 3; // <--- Key point here
+  repeated MatchEvent events = 3;
   uint64 request_id = 4;
 }
 
-// 6. Service Definition
+message OrderBatchResponse {
+  bool success = 1;
+  string message = 2;
+  uint64 processed_count = 3; 
+}
+
+// --- Service Definition ---
 service MatchingEngine {
- rpc PlaceOrder (OrderRequest) returns (OrderResponse);
- rpc PlaceOrderStream (stream OrderRequest) returns (stream OrderResponse);
+
+  rpc PlaceOrder (OrderRequest) returns (OrderResponse);
+  rpc PlaceOrderStream (stream OrderRequest) returns (stream OrderResponse);
+  rpc PlaceBatchStream (stream OrderBatchRequest) returns (stream OrderBatchResponse);
 }

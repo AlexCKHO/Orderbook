@@ -3,8 +3,8 @@ use crate::models::order::{Order, OrderEntry, OrderType, Side};
 // Note: Orderbook on Tokio Integrating Sync Logic with Async Runtime
 pub struct OrderBook {
     // FIFO;
-     bids: Vec<OrderEntry>,
-     asks: Vec<OrderEntry>,
+    pub(crate) bids: Vec<OrderEntry>,
+     pub(crate) asks: Vec<OrderEntry>,
 }
 
 impl OrderBook {
