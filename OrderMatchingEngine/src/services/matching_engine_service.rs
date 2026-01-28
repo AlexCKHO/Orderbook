@@ -4,10 +4,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::Mutex;
 use tonic::{Request, Response, Status, Streaming};
 
-// 🔥 Stream 相關引用
+// 🔥 Stream related imports
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
-use tokio_stream::StreamExt; // 讓 stream 有 .next() / .message()
+use tokio_stream::StreamExt; // Provides .next() / .message() for streams
 use std::pin::Pin;
 use futures::Stream;
 
@@ -32,8 +32,8 @@ impl MatchingEngineService {
         }
     }
 
-    // 🛠️ Helper Function: 提取核心邏輯，避免代碼重複
-    // 這段邏輯負責：驗證 -> 轉換 -> 撮合 -> 生成 Response
+    // 🛠️ Helper Function: Extracts core logic to avoid code duplication
+    // This logic handles: Validation -> Transformation -> Matching -> Response Generation
     async fn _process_order(&self, req: OrderRequest) -> Result<OrderResponse, Status> {
 
         // --- A. Server Arrival Time ---
@@ -73,7 +73,7 @@ impl MatchingEngineService {
         };
 
         // --- C. Execution (Critical Section) ---
-        // 鎖住 Engine -> 執行 -> 自動解鎖
+        // Lock Engine -> Execute -> Auto-unlock
         let internal_events = {
             let mut engine = self.engine.lock().await;
             engine.add_order(order)
@@ -109,7 +109,7 @@ impl MatchingEngineService {
             success: true,
             message: "".to_string(),
             events: proto_events,
-            request_id: req.id, // 🔥 關鍵：必須回傳 ID 給 Client 計算 Latency
+            request_id: req.id, // 🔥 Key: Must return ID to Client for Latency calculation
         })
     }
 }
@@ -117,18 +117,18 @@ impl MatchingEngineService {
 #[tonic::async_trait]
 impl MatchingEngine for MatchingEngineService {
 
-   // 1. 單次請求 (保留兼容性)
+    // 1. Single Request (Retained for compatibility)
     async fn place_order(
         &self,
         request: Request<OrderRequest>,
     ) -> Result<Response<OrderResponse>, Status> {
         let req = request.into_inner();
-        // 直接調用 Helper
+        // Call helper directly
         let response = self._process_order(req).await?;
         Ok(Response::new(response))
     }
 
-    // 🔥 2. 雙向串流 (Streaming Implementation)
+    // 🔥 2. Bidirectional Streaming (Streaming Implementation)
     type PlaceOrderStreamStream = Pin<Box<dyn Stream<Item = Result<OrderResponse, Status>> + Send>>;
 
     async fn place_order_stream(
@@ -139,35 +139,29 @@ impl MatchingEngine for MatchingEngineService {
         println!("🌊 Streaming connection established...");
         let mut in_stream = request.into_inner();
 
-        // 為了在 tokio::spawn 裡使用 self，我們需要複製 Arc 指針 (如果 engine 是 Arc)
-        // 但這裡我們是複製 Engine 的 Arc，所以我們需要 clone service 本身或者 engine
-        // 這裡最簡單的方法是：我們只需要 engine 來處理
-        // 但由於 _process_order 是 &self 方法，我們需要 Arc<Self> 或者手動 clone engine
-        // 為了簡化，我們直接在 loop 裡調用 engine lock，稍微改寫 helper 調用方式不太方便
-        // ✅ 解決方案：因為 self.engine 是 Arc，我們 clone engine 指針傳進去重寫一點邏輯，
-        // 或者將 `_process_order` 變成不依賴 &self 的 static function (或者只要 engine 參數)
-
-        // 這裡我直接用最簡單的方法：在 spawn 裡面重用 helper 邏輯的變種，
-        // 或者將 self 包成 Arc。但在 tonic trait 裡 self 是 &self。
-        // 所以最乾淨的做法是：將 engine clone 出來，傳入 task。
+        // To use 'self' inside tokio::spawn, we need to clone the Arc pointer (if engine is Arc).
+        // Since engine is already an Arc, we clone the engine pointer to move it into the task.
+        // Alternatively, we could wrap the service itself in an Arc, but since we are in a tonic trait,
+        // self is &self. The cleanest way here is to clone the engine.
 
         let engine_clone = self.engine.clone(); // Clone Arc<Mutex<>>
 
-        // 建立 Channel (Buffer = 10000)
+        // Create Channel (Buffer = 10000)
         let (tx, rx) = mpsc::channel(10000);
 
         tokio::spawn(async move {
             while let Ok(Some(req)) = in_stream.message().await {
-                // 這裡我們不能直接調用 self._process_order，因為 self 的生命週期問題
-                // 所以我們這裡手動執行 _process_order 的邏輯 (或者將 _process_order 改為 static)
-                // 為了不讓這段代碼太複雜，我在這裡直接展開邏輯：
+                // We cannot call self._process_order here due to self lifetime issues.
+                // Instead, we manually execute the logic (or could refactor _process_order to be static).
+                // Logic expanded here for simplicity:
 
                 // --- Logic Start ---
-                // 1. Validation (簡化版，省略部分 check 以加速 demo，真實專案應封裝 validate fn)
+                // 1. Validation (Simplified version, omitting some checks for demo speed;
+                // in real projects, this should be an encapsulated validation fn)
                 let side_res = match req.side { 1 => Ok(Side::Bid), 2 => Ok(Side::Ask), _ => Err(()) };
                 let type_res = match req.order_type { 1 => Ok(OrderType::Limit), 2 => Ok(OrderType::Market), _ => Err(()) };
 
-                if side_res.is_err() || type_res.is_err() { continue; } // Skip invalid
+                if side_res.is_err() || type_res.is_err() { continue; } // Skip invalid orders
                 let side = side_res.unwrap();
                 let order_type = type_res.unwrap();
 
@@ -197,7 +191,7 @@ impl MatchingEngine for MatchingEngineService {
                                 maker_id, taker_id, price, qty, timestamp: timestamp as i64,
                             })
                         },
-                        _ => continue, // Cancel/Kill 省略
+                        _ => continue, // Omitted Cancel/Kill for brevity
                     };
                     proto_events.push(orderbook_grpc::MatchEvent { event_data: Some(event_data) });
                 }
@@ -206,11 +200,11 @@ impl MatchingEngine for MatchingEngineService {
                     success: true,
                     message: "".to_string(),
                     events: proto_events,
-                    request_id: req.id, // Echo ID
+                    request_id: req.id, // Echo ID back
                 };
                 // --- Logic End ---
 
-                // 發送回覆，如果失敗 (Client斷線) 就跳出 loop
+                // Send response; if it fails (Client disconnected), break the loop
                 if tx.send(Ok(response)).await.is_err() {
                     break;
                 }
