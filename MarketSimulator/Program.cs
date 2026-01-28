@@ -8,7 +8,7 @@ namespace MarketSimulator;
 
 class Program
 {
-    // 🔥 Increased to 300k orders to ensure the test duration is long enough
+    // Increased to 300k orders to ensure the test duration is long enough
     private const int TotalOrders = 300_000; 
     private const string Address = "http://127.0.0.1:50051";
 
@@ -27,7 +27,7 @@ class Program
         var latencies = new ConcurrentDictionary<ulong, long>();
 
         // ==========================================
-        // 🔥 WARM UP PHASE 
+        //  WARM UP PHASE 
         // ==========================================
         Console.WriteLine("🏃 Warming up engine (sending 1000 orders)...");
         await RunTest(client, requests.Take(1000).ToArray(), null); // Pass null to skip recording
@@ -38,7 +38,7 @@ class Program
         Console.WriteLine("========================================");
         
         // ==========================================
-        // 🚀 REAL TEST PHASE 
+        //  REAL TEST PHASE 
         // ==========================================
         await RunTest(client, requests, latencies);
     }
