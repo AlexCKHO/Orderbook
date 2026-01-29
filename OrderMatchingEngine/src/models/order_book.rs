@@ -1,15 +1,17 @@
 use crate::models::events::MatchEvent;
 use crate::models::order::{Order, OrderEntry, OrderType, Side};
+use std::collections::VecDeque;
 // Note: Orderbook on Tokio Integrating Sync Logic with Async Runtime
 pub struct OrderBook {
     // FIFO;
-    pub(crate) bids: Vec<OrderEntry>,
-     pub(crate) asks: Vec<OrderEntry>,
+    pub bids: Vec<Option<VecDeque<OrderEntry>>>,
+    pub(crate) asks: Vec<Option<VecDeque<OrderEntry>>>,
+
+    pub active_prices: Vec<u64>,
 }
 
 impl OrderBook {
-    
-    pub fn new() -> Self {  
+    pub fn new() -> Self {
         OrderBook {
             // bids: Vec::new(),
             // asks: Vec::new(),
