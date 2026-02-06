@@ -5,7 +5,7 @@ use std::collections::VecDeque;
 pub struct OrderBook {
     // FIFO;
     pub bids: Vec<Option<VecDeque<OrderEntry>>>,
-    pub(crate) asks: Vec<Option<VecDeque<OrderEntry>>>,
+    pub asks: Vec<Option<VecDeque<OrderEntry>>>,
 
     pub active_prices: Vec<u64>,
 }
