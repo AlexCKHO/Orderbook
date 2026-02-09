@@ -19,6 +19,12 @@ impl OrderBook {
             order_locations: HashMap::new(),
         }
     }
+
+    pub fn clear(&mut self) {
+        self.bids.clear();
+        self.asks.clear();
+        self.order_locations.clear();
+    }
     pub fn add_order(&mut self, order: Order) -> Vec<MatchEvent> {
         let mut events = Vec::new();
         if order.order_type == OrderType::Limit {
