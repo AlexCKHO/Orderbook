@@ -165,12 +165,12 @@ impl OrderBook {
         });
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::VecDeque;
 
-    /// Helper function to construct Orders to reduce boilerplate code in tests.
+    /// Helper function to construct Orders
     fn new_order(
         id: u64,
         price: u64,
@@ -186,291 +186,168 @@ mod tests {
             side,
             order_type,
             timestamp,
-            // Initialize timestamp here if added in the future
         }
     }
 
     #[test]
     fn test_limit_order_matching() {
-        // 1. Initialize OrderBook
-        let mut ob = OrderBook {
-            bids: Vec::new(),
-            asks: Vec::new(),
-        };
+        // 1. Initialize OrderBook (Use new(), don't construct manually)
+        let mut ob = OrderBook::new();
 
         // 2. Scenario: User A places a Sell order (Maker)
         // Ask @ 100, Qty 10
-        let ask_order = new_order(1, 100, 10, Side::Ask, OrderType::Limit, 1768032384123456789);
+        let ask_order = new_order(1, 100, 10, Side::Ask, OrderType::Limit, 1000);
         ob.add_order(ask_order);
 
-        // Check: Order should be successfully added to the Asks queue
-        assert_eq!(ob.asks.len(), 1);
-        assert_eq!(ob.bids.len(), 0);
+        // Check: Order should be in Asks BTreeMap at price 100
+        assert!(ob.asks.contains_key(&100));
+        assert_eq!(ob.asks.get(&100).unwrap().len(), 1);
+        assert!(ob.bids.is_empty());
 
         // 3. Scenario: User B tries to Buy (Taker), but price is too low
         // Bid @ 99, Qty 5
-        let bid_cheap = new_order(2, 99, 5, Side::Bid, OrderType::Limit, 1768052384123456789);
+        let bid_cheap = new_order(2, 99, 5, Side::Bid, OrderType::Limit, 2000);
         ob.add_order(bid_cheap);
 
-        // Check: No match should occur due to price mismatch. Order enters Bids queue.
-        assert_eq!(ob.bids.len(), 1);
-        assert_eq!(ob.asks[0].qty, 10); // The Ask order remains untouched
+        // Check: No match. Bid enters Bids BTreeMap at price 99.
+        assert!(ob.bids.contains_key(&99));
+        assert_eq!(ob.asks.get(&100).unwrap()[0].qty, 10); // Ask remains untouched
 
-        // 4. Scenario: User C places a Buy order (Taker) with matching price (Aggressive)
+        // 4. Scenario: User C places a Buy order (Taker) with matching price
         // Bid @ 100, Qty 3
-        let bid_match = new_order(3, 100, 3, Side::Bid, OrderType::Limit, 1768082384123456789);
-        ob.add_order(bid_match);
+        let bid_match = new_order(3, 100, 3, Side::Bid, OrderType::Limit, 3000);
+        let events = ob.add_order(bid_match);
 
-        // Check: Immediate match should occur!
-        // Bids queue should still have 1 order (User C is filled immediately, User B remains)
-        assert_eq!(ob.bids.len(), 1);
+        // Check: Immediate match!
+        // 1. User C (Bid) is fully filled, so it should NOT be in Bids book.
+        //    (Only User B @ 99 remains)
+        assert!(!ob.bids.contains_key(&100));
+        assert!(ob.bids.contains_key(&99));
 
-        // Asks queue should still have 1 order, but quantity reduces from 10 to 7 (Partial Fill)
-        assert_eq!(ob.asks.len(), 1);
-        assert_eq!(ob.asks[0].qty, 7);
+        // 2. Ask @ 100 should still exist, but Qty reduces 10 -> 7
+        assert_eq!(ob.asks.get(&100).unwrap()[0].qty, 7);
+
+        // 3. Check Events
+        assert_eq!(events.len(), 1); // Should have 1 TradeExecuted event
 
         println!("✅ Test Passed: Basic Matching Logic is Correct!");
     }
 
     #[test]
     fn test_fifo_ordering() {
-        let mut ob = OrderBook {
-            bids: Vec::new(),
-            asks: Vec::new(),
-        };
+        let mut ob = OrderBook::new();
 
-        // User A places Bid @ 100 (First arrival)
-        ob.add_order(new_order(
-            1,
-            100,
-            10,
-            Side::Bid,
-            OrderType::Limit,
-            1768032384123456789,
-        ));
+        // User A places Bid @ 100 (First)
+        ob.add_order(new_order(1, 100, 10, Side::Bid, OrderType::Limit, 1000));
 
-        // User B places Bid @ 100 (Arrives later)
-        ob.add_order(new_order(
-            2,
-            100,
-            10,
-            Side::Bid,
-            OrderType::Limit,
-            1768052384123456789,
-        ));
+        // User B places Bid @ 100 (Later)
+        ob.add_order(new_order(2, 100, 10, Side::Bid, OrderType::Limit, 2000));
 
-        // Expected Memory Layout (Bids are Ascending):
-        // [100 (User B/New), 100 (User A/Old)]
-        // pop() retrieves from the end -> gets User A (Old) first.
+        // Layout in BTreeMap: Key 100 -> VecDeque [Order(1), Order(2)]
+        // Verification:
+        let queue = ob.bids.get(&100).unwrap();
+        assert_eq!(queue.len(), 2);
+        assert_eq!(queue[0].id, 1); // Front is User A
+        assert_eq!(queue[1].id, 2); // Back is User B
 
-        // Validation Logic:
-        // An incoming Sell order @ 100, Qty 10 should completely fill User A, leaving User B.
-        ob.add_order(new_order(
-            3,
-            100,
-            10,
-            Side::Ask,
-            OrderType::Limit,
-            1768082384123456789,
-        ));
+        // Match Logic: Sell order @ 100, Qty 10
+        // Should consume User A (Front) completely.
+        ob.add_order(new_order(3, 100, 10, Side::Ask, OrderType::Limit, 3000));
 
-        // The remaining order in the book should be User B (ID 2), honoring Time Priority.
-        assert_eq!(ob.bids[0].id, 2);
+        // The remaining order in the book should be User B (ID 2).
+        let queue_after = ob.bids.get(&100).unwrap();
+        assert_eq!(queue_after.len(), 1);
+        assert_eq!(queue_after[0].id, 2); // User B is now at the front
     }
 
     #[test]
     fn test_asks_fifo_ordering() {
-        let mut ob = OrderBook {
-            bids: Vec::new(),
-            asks: Vec::new(),
-        };
+        let mut ob = OrderBook::new();
 
-        // 1. Seller A places Ask @ 100 (First arrival - "The Old Order")
-        // ID: 1
-        ob.add_order(new_order(
-            1,
-            100,
-            10,
-            Side::Ask,
-            OrderType::Limit,
-            1768032384123456789,
-        ));
+        // Seller A places Ask @ 100 (First)
+        ob.add_order(new_order(1, 100, 10, Side::Ask, OrderType::Limit, 1000));
 
-        // 2. Seller B places Ask @ 100 (Later arrival - "The New Order")
-        // ID: 2
-        ob.add_order(new_order(
-            2,
-            100,
-            10,
-            Side::Ask,
-            OrderType::Limit,
-            1768052384123456789,
-        ));
+        // Seller B places Ask @ 100 (Later)
+        ob.add_order(new_order(2, 100, 10, Side::Ask, OrderType::Limit, 2000));
 
-        // --- Memory Layout Check (Mental Model) ---
-        // Asks are sorted Descending: [Highest ... Lowest]
-        // Since Price is equal, Logic dictates New comes BEFORE Old.
-        // Expected Vector State: [ {ID:2, Price:100}, {ID:1, Price:100} ]
-        // The last element (ID:1) is the "Best Ask" because it arrived first.
+        // Layout: Key 100 -> VecDeque [Order(1), Order(2)]
 
-        // 3. Buyer C comes in to Buy 10 units @ 100
-        // This should trigger a match against the "Best Ask".
-        ob.add_order(new_order(
-            3,
-            100,
-            10,
-            Side::Bid,
-            OrderType::Limit,
-            1768082384123456789,
-        ));
+        // Buyer C comes to buy 10 @ 100
+        ob.add_order(new_order(3, 100, 10, Side::Bid, OrderType::Limit, 3000));
 
-        // --- Assertions ---
-        // Buyer C should be fully filled.
-        assert_eq!(ob.bids.len(), 0);
-
+        // Assertions:
         // One Ask should remain.
-        assert_eq!(ob.asks.len(), 1);
+        assert_eq!(ob.asks.get(&100).unwrap().len(), 1);
 
         // The remaining Ask MUST be User B (ID: 2).
-        // Why? Because User A (ID: 1) was at the end of the vector and got popped first.
-        assert_eq!(ob.asks[0].id, 2);
+        // User A (ID: 1) was at front and got popped.
+        assert_eq!(ob.asks.get(&100).unwrap()[0].id, 2);
 
-        println!("✅ Test Passed: Asks FIFO (Price-Time Priority) is Correct!");
+        println!("✅ Test Passed: Asks FIFO is Correct!");
     }
 
     #[test]
     fn test_market_bid_order_ioc() {
-        let mut ob = OrderBook {
-            bids: vec![],
-            asks: vec![],
-        };
+        let mut ob = OrderBook::new();
 
         // 1. Setup Liquidity (Asks)
-        // Seller A: Limit Sell @ 100, Qty 10 (Best Price)
-        ob.add_order(new_order(
-            1,
-            100,
-            10,
-            Side::Ask,
-            OrderType::Limit,
-            1768032384123456789,
-        ));
-        // Seller B: Limit Sell @ 102, Qty 20 (Worse Price)
-        ob.add_order(new_order(
-            2,
-            102,
-            20,
-            Side::Ask,
-            OrderType::Limit,
-            1768033384123456789,
-        ));
+        // Seller A: Limit Sell @ 100, Qty 10
+        ob.add_order(new_order(1, 100, 10, Side::Ask, OrderType::Limit, 1000));
+        // Seller B: Limit Sell @ 102, Qty 20
+        ob.add_order(new_order(2, 102, 20, Side::Ask, OrderType::Limit, 2000));
 
         // 2. Market Buy comes in (Qty 15)
-        // Expectation: It should consume the entire level at $100 (10 qty)
-        // and partially consume the level at $102 (5 qty).
-        ob.add_order(new_order(
-            3,
-            0,
-            15,
-            Side::Bid,
-            OrderType::Market,
-            1768033484123456789,
-        ));
+        // Logic: Consumes 10 @ 100, then 5 @ 102.
+        ob.add_order(new_order(3, 0, 15, Side::Bid, OrderType::Market, 3000));
 
-        // Check: The $100 price level should be fully consumed (Popped).
-        assert_eq!(ob.asks.len(), 1);
+        // Check: The $100 price level should be gone (Empty queue removes the key).
+        assert!(!ob.asks.contains_key(&100));
 
         // Check: The $102 price level should remain with 15 qty (20 - 5).
-        // Since Asks are sorted Descending, the remaining one is at index 0.
-        assert_eq!(ob.asks[0].qty, 15);
-        assert_eq!(ob.asks[0].price, 102);
+        let queue_102 = ob.asks.get(&102).unwrap();
+        assert_eq!(queue_102[0].qty, 15);
+        assert_eq!(queue_102[0].price, 102);
 
         // 3. Huge Market Buy (Qty 1000)
-        // Expectation: Consumes the remaining 15 units, then the rest of the order is killed (IOC).
-        // It does NOT enter the queue.
-        ob.add_order(new_order(
-            4,
-            0,
-            1000,
-            Side::Bid,
-            OrderType::Market,
-            1768033485123456789,
-        ));
+        // Logic: Consumes remaining 15 @ 102. The rest (985) is Killed (IOC).
+        ob.add_order(new_order(4, 0, 1000, Side::Bid, OrderType::Market, 4000));
 
         // Check: Asks should be completely empty.
-        assert_eq!(ob.asks.len(), 0);
-        // Check: Bids should also be empty (because Market Orders are IOC and don't queue).
-        assert_eq!(ob.bids.len(), 0);
+        assert!(ob.asks.is_empty());
+        // Check: Bids should also be empty (Market orders don't rest).
+        assert!(ob.bids.is_empty());
 
         println!("✅ Test Passed: Market Bid Order (IOC) logic is correct!");
     }
 
     #[test]
     fn test_market_ask_order_ioc() {
-        let mut ob = OrderBook {
-            bids: vec![],
-            asks: vec![],
-        };
+        let mut ob = OrderBook::new();
 
         // 1. Setup Liquidity (Bids)
-        // Buyer A: Limit Buy @ 98, Qty 20 (Lower Price)
-        ob.add_order(new_order(
-            1,
-            98,
-            20,
-            Side::Bid,
-            OrderType::Limit,
-            1768033384123456789,
-        ));
-        // Buyer B: Limit Buy @ 100, Qty 10 (Higher/Best Price)
-        ob.add_order(new_order(
-            2,
-            100,
-            10,
-            Side::Bid,
-            OrderType::Limit,
-            1768033484123456789,
-        ));
-
-        // Verify Layout: Bids are Ascending [98, 100].
-        // pop() takes from the end, so it should take $100 first.
+        // Buyer A: Limit Buy @ 98, Qty 20
+        ob.add_order(new_order(1, 98, 20, Side::Bid, OrderType::Limit, 1000));
+        // Buyer B: Limit Buy @ 100, Qty 10
+        ob.add_order(new_order(2, 100, 10, Side::Bid, OrderType::Limit, 2000));
 
         // 2. Market Sell comes in (Qty 15)
-        // Expectation: It should hit the Best Bid ($100) first (eats 10),
-        // then hit the Next Best Bid ($98) (eats 5).
-        ob.add_order(new_order(
-            3,
-            0,
-            15,
-            Side::Ask,
-            OrderType::Market,
-            1768033584123456789,
-        ));
+        // Logic: Hits Best Bid ($100) first (eats 10), then ($98) (eats 5).
+        ob.add_order(new_order(3, 0, 15, Side::Ask, OrderType::Market, 3000));
 
-        // Check: The $100 Bid should be fully consumed (Popped).
-        // Only 1 bid level remains.
-        assert_eq!(ob.bids.len(), 1);
+        // Check: The $100 Bid should be gone.
+        assert!(!ob.bids.contains_key(&100));
 
-        // Check: The remaining Bid should be the $98 one, with qty reduced.
-        // Original 20 - 5 consumed = 15 remaining.
-        assert_eq!(ob.bids[0].price, 98);
-        assert_eq!(ob.bids[0].qty, 15);
+        // Check: The remaining Bid should be the $98 one, qty 15.
+        let queue_98 = ob.bids.get(&98).unwrap();
+        assert_eq!(queue_98[0].price, 98);
+        assert_eq!(queue_98[0].qty, 15);
 
         // 3. Huge Market Sell (Qty 1000)
-        // Expectation: Consumes the remaining 15 units at $98.
-        // The rest of the sell order (985 qty) is Killed immediately (IOC).
-        ob.add_order(new_order(
-            4,
-            0,
-            1000,
-            Side::Ask,
-            OrderType::Market,
-            1768033585123456789,
-        ));
+        ob.add_order(new_order(4, 0, 1000, Side::Ask, OrderType::Market, 4000));
 
-        // Check: Orderbook should be completely empty.
-        assert_eq!(ob.bids.len(), 0);
-        assert_eq!(ob.asks.len(), 0);
+        // Check: Empty.
+        assert!(ob.bids.is_empty());
+        assert!(ob.asks.is_empty());
 
         println!("✅ Test Passed: Market Ask Order (IOC) logic is correct!");
     }
