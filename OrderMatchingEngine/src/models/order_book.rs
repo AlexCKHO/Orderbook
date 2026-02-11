@@ -26,77 +26,143 @@ impl OrderBook {
     }
     pub fn add_order(&mut self, order: Order) -> Vec<MatchEvent> {
         let mut events = Vec::new();
-        if order.order_type == OrderType::Limit {
-            if order.side == Side::Bid {
-                self.match_new_limit_bid(order, &mut events);
-            } else if order.side == Side::Ask {
-                self.match_new_limit_ask(order, &mut events);
-            }
-        } else if order.order_type == OrderType::Market {
-            if order.side == Side::Bid {
-                self.match_new_market_bid(order, &mut events);
-            } else if order.side == Side::Ask {
-                self.match_new_market_ask(order, &mut events);
-            }
+
+        if order.side == Side::Bid {
+            self.match_new_bid(order, &mut events);
+        } else if order.side == Side::Ask {
+            self.match_new_ask(order, &mut events);
         }
 
         return events;
     }
 
     // When people are buying
-    fn match_new_limit_bid(&mut self, mut new_bid_order: Order, events: &mut Vec<MatchEvent>) {
-       while new_bid_order.qty > 0 {
+    fn match_new_bid(&mut self, mut new_bid_order: Order, events: &mut Vec<MatchEvent>) {
+        while new_bid_order.qty > 0 {
+            if let Some((&ask_price, ask_queue)) = self.asks.iter_mut().next() {
+                if new_bid_order.order_type == OrderType::Limit && ask_price > new_bid_order.price {
+                    break;
+                }
 
-           if let Some((&ask_price, ask_queue)) = self.asks.iter_mut().next() {
-               if ask_price > new_bid_order.price {
-                   break;
-               }
+                let best_ask_order = ask_queue.front_mut().unwrap();
 
-               let best_ask_order = ask_queue.front_mut().unwrap();
+                let match_qty = std::cmp::min(best_ask_order.qty, new_bid_order.qty);
 
-               let match_qty = std::cmp::min(best_ask_order.qty, new_bid_order.qty);
+                new_bid_order.qty -= match_qty;
+                best_ask_order.qty -= match_qty;
 
-               new_bid_order.qty -= match_qty;
+                events.push(MatchEvent::TradeExecuted {
+                    maker_id: best_ask_order.id,
+                    taker_id: new_bid_order.id,
+                    price: best_ask_order.price,
+                    qty: match_qty,
+                    timestamp: new_bid_order.timestamp,
+                });
 
-               if best_ask_order.qty == 0 {
-                   let removed_order = ask_queue.pop_front().unwrap();
-                   self.order_locations.remove(&removed_order.id);
-               }
+                if best_ask_order.qty == 0 {
+                    let removed_order = ask_queue.pop_front().unwrap();
+                    self.order_locations.remove(&removed_order.id);
+                }
 
-               if ask_queue.is_empty() {
-                   self.asks.remove(&ask_price);
-               }
-
-           }else {
-               break;
-           }
-       }
+                if ask_queue.is_empty() {
+                    self.asks.remove(&ask_price);
+                }
+            } else {
+                break;
+            }
+        }
 
         if new_bid_order.qty > 0 {
-            self.bids.entry(new_bid_order.price).or_insert_with(VecDeque::new).push_back(new_bid_order.clone());
-            self.order_locations.insert(new_bid_order.id, (new_bid_order.price, Side::Bid));
+            if (new_bid_order.order_type == OrderType::Limit) {
+                self.add_order_to_bids(new_bid_order, events);
+            } else if new_bid_order.order_type == OrderType::Market {
+                events.push(MatchEvent::OrderKilled {
+                    id: new_bid_order.id,
+                    killed_qty: new_bid_order.qty,
+                })
+            }
         }
     }
 
-    fn match_new_limit_ask(&mut self, mut new_ask_order: Order, events: &mut Vec<MatchEvent>) {
+    fn match_new_ask(&mut self, mut new_ask_order: Order, events: &mut Vec<MatchEvent>) {
+        while new_ask_order.qty > 0 {
+            // next_back gets the larget bid_price
+            if let Some((&bid_price, bid_queue)) = self.bids.iter_mut().next_back() {
+                // If the largest bid price is lower the new ask order price, no deal. 
+                if new_ask_order.order_type == OrderType::Limit && bid_price < new_ask_order.price {
+                    break;
+                }
 
-    }
+                let best_bid_order = bid_queue.front_mut().unwrap();
 
-    fn match_new_market_bid(&mut self, mut new_bid_order: Order, events: &mut Vec<MatchEvent>) {
+                let match_qty = std::cmp::min(best_bid_order.qty, new_ask_order.qty);
 
+                new_ask_order.qty -= match_qty;
+                best_bid_order.qty -= match_qty;
 
-    }
+                events.push(MatchEvent::TradeExecuted {
+                    maker_id: best_bid_order.id,
+                    taker_id: new_ask_order.id,
+                    price: best_bid_order.price,
+                    qty: match_qty,
+                    timestamp: new_ask_order.timestamp,
+                });
 
-    fn match_new_market_ask(&mut self, mut new_ask_order: Order, events: &mut Vec<MatchEvent>) {
+                if best_bid_order.qty == 0 {
+                    let removed_order = bid_queue.pop_front().unwrap();
+                    self.order_locations.remove(&removed_order.id);
+                }
 
+                if bid_queue.is_empty() {
+                    self.bids.remove(&bid_price);
+                }
+            } else {
+                break;
+            }
+        }
+        // Adding the remaining order to the queue if it is a market order => kill
+        if new_ask_order.qty > 0 {
+            if (new_ask_order.order_type == OrderType::Limit) {
+                self.add_order_to_asks(new_ask_order, events)
+            } else if (new_ask_order.order_type == OrderType::Market) {
+                events.push(MatchEvent::OrderKilled {
+                    id: new_ask_order.id,
+                    killed_qty: new_ask_order.qty,
+                })
+            }
+        }
     }
 
     pub fn add_order_to_bids(&mut self, new_bid_order: Order, events: &mut Vec<MatchEvent>) {
+        self.bids
+            .entry(new_bid_order.price) // 1. Locate the specific price level in the bid side of the book
+            .or_insert_with(VecDeque::new) // 2. If the price level is empty, initialize a new queue
+            .push_back(new_bid_order.clone()); // 3. Append the order to the end to maintain time priority (FIFO)
+        self.order_locations
+            .insert(new_bid_order.id, (new_bid_order.price, Side::Bid));
 
+        events.push(MatchEvent::OrderPlaced {
+            id: new_bid_order.id,
+            price: new_bid_order.price,
+            qty: new_bid_order.qty,
+            side: new_bid_order.side,
+        });
     }
 
     pub fn add_order_to_asks(&mut self, new_ask_order: Order, events: &mut Vec<MatchEvent>) {
+        self.asks
+            .entry(new_ask_order.price) // 1. Check if this price level already exists in the book
+            .or_insert_with(VecDeque::new) // 2. If not, create a new "queue" (VecDeque) for this price
+            .push_back(new_ask_order.clone()); // 3. Add the order to the end of the queue (FIFO)
+        self.order_locations
+            .insert(new_ask_order.id, (new_ask_order.price, Side::Ask));
 
+        events.push(MatchEvent::OrderPlaced {
+            id: new_ask_order.id,
+            price: new_ask_order.price,
+            qty: new_ask_order.qty,
+            side: new_ask_order.side,
+        });
     }
 }
 
