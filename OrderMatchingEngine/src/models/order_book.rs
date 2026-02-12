@@ -88,7 +88,7 @@ impl OrderBook {
         while new_ask_order.qty > 0 {
             // next_back gets the larget bid_price
             if let Some((&bid_price, bid_queue)) = self.bids.iter_mut().next_back() {
-                // If the largest bid price is lower the new ask order price, no deal. 
+                // If the largest bid price is lower the new ask order price, no deal.
                 if new_ask_order.order_type == OrderType::Limit && bid_price < new_ask_order.price {
                     break;
                 }
