@@ -3,85 +3,138 @@ using System.Diagnostics;
 using Grpc.Core;
 using Grpc.Net.Client;
 using Orderbook;
+using System.Net.Http;
 
 namespace MarketSimulator;
 
 class Program
 {
-    private const int TotalOrders = 500_000; // Target: 500k orders
-    private const int BatchSize = 100;       // 100 per batch 
+    private const int TotalOrders = 500_000;
     private const string Address = "http://127.0.0.1:50051";
 
     static async Task Main(string[] args)
     {
-        var httpHandler = new HttpClientHandler();
-        using var channel = GrpcChannel.ForAddress(Address, new GrpcChannelOptions { HttpHandler = httpHandler });
+        // Performance tuning for Apple M4
+        var httpHandler = new SocketsHttpHandler
+        {
+            // TCP No Delay is essential for HFT to send packets immediately
+            EnableMultipleHttp2Connections = true,
+            ConnectTimeout = TimeSpan.FromSeconds(5)
+        };
+
+        using var channel = GrpcChannel.ForAddress(Address, new GrpcChannelOptions 
+        { 
+            HttpHandler = httpHandler 
+        });
+        
         var client = new MatchingEngine.MatchingEngineClient(channel);
 
-        // 1. Pre-generate data
+        // Pre-generate all orders to avoid CPU overhead during the test
         Console.WriteLine($"⚡ Pre-generating {TotalOrders} orders...");
-        var rawOrders = Enumerable.Range(0, TotalOrders).Select(i => GenerateRandomOrder(i)).ToArray();
+        var requests = Enumerable.Range(0, TotalOrders).Select(i => GenerateRandomOrder(i)).ToArray();
 
-        // 2. Chunk the data - LINQ Chunk is a .NET 6+ feature
-        Console.WriteLine($"📦 Batching into chunks of {BatchSize}...");
-        var batches = rawOrders.Chunk(BatchSize).Select(chunk => new OrderBatchRequest
+        Console.WriteLine("\nChoose your destruction mode:");
+        Console.WriteLine("1. HFT Streaming (Industry Standard - Low Latency)");
+        Console.WriteLine("2. Batching (High Throughput - Higher Latency)");
+        Console.Write("Selection [1 or 2]: ");
+        var choice = Console.ReadLine();
+
+        if (choice == "1")
         {
-            Orders = { chunk } // Google Protobuf RepeatedField syntax
-        }).ToArray();
+            await RunStreamingTest(client, requests);
+        }
+        else
+        {
+            await RunBatchingTest(client, requests);
+        }
+    }
 
-        Console.WriteLine($"Ready to blast {batches.Length} batches ({TotalOrders} orders)...");
-        Console.WriteLine("Press ENTER to destroy the engine...");
-        Console.ReadLine();
-
+    // --- MODE 1: HFT STREAMING (The "No Delay" Way) ---
+    private static async Task RunStreamingTest(MatchingEngine.MatchingEngineClient client, OrderRequest[] orders)
+    {
+        Console.WriteLine("🚀 Launching HFT Streaming (Zero-waiting)...");
         var sw = Stopwatch.StartNew();
-        int processedCount = 0;
+        int successCount = 0;
 
-        // 3. Use Batch Stream
-        using var call = client.PlaceBatchStream();
+        using var call = client.PlaceOrderStream();
 
-        // Receiver Task
+        // Background receiver task
         var reader = Task.Run(async () =>
         {
-            await foreach (var response in call.ResponseStream.ReadAllAsync())
+            await foreach (var resp in call.ResponseStream.ReadAllAsync())
             {
-                // Since this is a Batch response, increment count by the amount the Server processed
-                Interlocked.Add(ref processedCount, (int)response.ProcessedCount);
+                Interlocked.Increment(ref successCount);
             }
         });
 
-        // Sender Loop (Sending Batches)
+        // Firehose: push every order immediately into the stream
+        foreach (var req in orders)
+        {
+            await call.RequestStream.WriteAsync(req);
+        }
+
+        await call.RequestStream.CompleteAsync();
+        await reader;
+        sw.Stop();
+
+        PrintReport("HFT STREAMING", sw, successCount);
+    }
+
+    // --- MODE 2: BATCHING (The "Pack & Send" Way) ---
+    private static async Task RunBatchingTest(MatchingEngine.MatchingEngineClient client, OrderRequest[] orders)
+    {
+        const int BatchSize = 100;
+        Console.WriteLine($"🚀 Launching Batching (Size: {BatchSize})...");
+        
+        // Group orders into batches of 100
+        var batches = orders.Chunk(BatchSize).Select(chunk => new OrderBatchRequest
+        {
+            Orders = { chunk }
+        }).ToArray();
+
+        var sw = Stopwatch.StartNew();
+        int totalProcessed = 0;
+
+        using var call = client.PlaceBatchStream();
+
+        var reader = Task.Run(async () =>
+        {
+            await foreach (var resp in call.ResponseStream.ReadAllAsync())
+            {
+                Interlocked.Add(ref totalProcessed, (int)resp.ProcessedCount);
+            }
+        });
+
         foreach (var batch in batches)
         {
             await call.RequestStream.WriteAsync(batch);
         }
+
         await call.RequestStream.CompleteAsync();
-        
-        // Wait for all responses
         await reader;
         sw.Stop();
 
-        PrintReport(sw, processedCount);
+        PrintReport("BATCHING", sw, totalProcessed);
     }
 
-    private static OrderRequest GenerateRandomOrder(int index)
+    private static OrderRequest GenerateRandomOrder(int index) => new OrderRequest
     {
-        return new OrderRequest
-        {
-            Id = (ulong)(1000000 + index),
-            Price = (ulong)Random.Shared.Next(100, 201),
-            Qty = (ulong)Random.Shared.Next(1, 100),
-            Side = Random.Shared.Next(0, 2) == 0 ? Side.Bid : Side.Ask,
-            OrderType = OrderType.Limit,
-            Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-        };
-    }
+        Id = (ulong)(3000000 + index),
+        Price = (ulong)Random.Shared.Next(100, 201),
+        Qty = (ulong)Random.Shared.Next(1, 100),
+        Side = Random.Shared.Next(0, 2) == 0 ? Side.Bid : Side.Ask,
+        OrderType = OrderType.Limit,
+        Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+    };
 
-    private static void PrintReport(Stopwatch sw, int count)
+    private static void PrintReport(string mode, Stopwatch sw, int count)
     {
-        double tps = count / sw.Elapsed.TotalSeconds;
-        Console.WriteLine("\n🚀 BATCHING RESULT:");
-        Console.WriteLine($"⏱️ Total Time: {sw.ElapsedMilliseconds}ms");
-        Console.WriteLine($"⚡ TPS: {tps:N0} orders/sec");
+        Console.WriteLine($"\n{new string('=', 40)}");
+        Console.WriteLine($"🏁 {mode} RESULT");
+        Console.WriteLine($"{new string('=', 40)}");
+        Console.WriteLine($"⚡ TPS: {count / sw.Elapsed.TotalSeconds:N0} orders/sec");
+        Console.WriteLine($"⏱️ Total Time: {sw.ElapsedMilliseconds} ms");
         Console.WriteLine($"✅ Processed: {count}");
+        Console.WriteLine(new string('=', 40));
     }
 }
