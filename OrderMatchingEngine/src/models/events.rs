@@ -1,4 +1,4 @@
-use crate::models::order::Side;
+use crate::models::order::{Order, Side};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum MatchEvent {
@@ -7,3 +7,5 @@ pub enum MatchEvent {
     OrderCancelled {id: u64, cancelled_qty: u64},
     OrderKilled {id: u64, killed_qty: u64},
 }
+
+

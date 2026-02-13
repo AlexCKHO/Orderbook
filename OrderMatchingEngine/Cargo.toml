@@ -13,7 +13,8 @@ tonic = "0.12"           # gRPC Server framework
 prost = "0.13"           # handle Protobuf data
 tokio = { version = "1.0", features = ["macros", "rt-multi-thread"] } # Async Runtime (enable Rust handle Request concurrently)
 tokio-stream = { version = "0.1", features = ["net"] }
-futures = "0.3"          # Async tool
+futures = "0.3"
+oneshot = "0.1.13"          # Async tool
 
 [build-dependencies]     # Complie tool
 tonic-build = "0.12"     # transform .proto file to Rust Code

@@ -2,11 +2,11 @@ use crate::models::order_book::OrderBook;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::Mutex;
+use tokio::sync::{mpsc, oneshot};
 use tonic::{Request, Response, Status, Streaming};
 
 use futures::Stream;
 use std::pin::Pin;
-use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
 
@@ -23,6 +23,14 @@ use crate::models::order::{Order, OrderType, Side};
 
 pub struct MatchingEngineService {
     engine: Arc<Mutex<OrderBook>>,
+}
+
+enum OrderCommand {
+    PlaceOrder {
+        order: Order,
+        // Use oneshot channel, to send the result to gRPC handler
+        resp: oneshot::Sender<Vec<InternalEvent>>,
+    },
 }
 
 impl MatchingEngineService {
