@@ -7,6 +7,7 @@ use tonic::{Request, Response, Status, Streaming};
 
 use futures::Stream;
 use std::pin::Pin;
+use tokio::sync::mpsc::Receiver;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
 
@@ -22,7 +23,7 @@ use crate::models::events::MatchEvent as InternalEvent;
 use crate::models::order::{Order, OrderType, Side};
 
 pub struct MatchingEngineService {
-    engine: Arc<Mutex<OrderBook>>,
+    sender: mpsc::Sender<OrderCommand>,
 }
 
 enum OrderCommand {
@@ -35,10 +36,12 @@ enum OrderCommand {
 
 impl MatchingEngineService {
     pub fn new() -> Self {
-        let order_book = OrderBook::new();
-        Self {
-            engine: Arc::new(Mutex::new(order_book)),
-        }
+        let (tx, rx) = mpsc::channel(100_000);
+
+        run_matching_actor(rx);
+
+        Self {sender: tx}
+
     }
 
     // 🛠️ Helper Function: Extracts core logic to avoid code duplication
@@ -87,11 +90,19 @@ impl MatchingEngineService {
         };
 
         // --- C. Execution (Critical Section) ---
-        // Lock Engine -> Execute -> Auto-unlock
-        let internal_events = {
-            let mut engine = self.engine.lock().await;
-            engine.add_order(order)
+
+        let (resp_tx, resp_rx) = oneshot::channel();
+
+        let cmd = OrderCommand::PlaceOrder {
+            order,
+            resp: resp_tx
         };
+
+        if self.sender.send(cmd).await.is_err() {
+            return Err(Status::internal("Matching engine actor died"))
+        }
+
+        let internal_events =  resp_rx.await.map_err(|_| Status::internal("Actor dropped response"))?;
 
         // --- D. Translation ---
         let mut proto_events = Vec::new();
@@ -146,8 +157,31 @@ impl MatchingEngineService {
     }
 }
 
+fn run_matching_actor(mut rx: mpsc::Receiver<OrderCommand>){
+    tokio::spawn(async move {
+        let mut order_book = OrderBook::new();
+
+        while let Some(cmd) = rx.recv().await {
+
+            match cmd {
+                OrderCommand::PlaceOrder {order,resp  } => {
+
+                    let events = order_book.add_order(order);
+
+                    let _ = resp.send(events);
+                }
+            }
+
+        }
+    });
+
+}
+
+
+
 #[tonic::async_trait]
 impl MatchingEngine for MatchingEngineService {
+
     // 1. Single Request (Retained for compatibility)
     async fn place_order(
         &self,
@@ -172,8 +206,6 @@ impl MatchingEngine for MatchingEngineService {
         // To use `self` inside tokio::spawn, we need to clone the Arc pointer (if engine is Arc).
         // Since self.engine is Arc, we can clone it and move it into the task.
         // We avoid calling self._process_order because of lifetime issues with &self in a spawned task.
-
-        let engine_clone = self.engine.clone(); // Clone Arc<Mutex<>>
 
         // Create Channel (Buffer = 10000)
         let (tx, rx) = mpsc::channel(10000);
@@ -218,6 +250,7 @@ impl MatchingEngine for MatchingEngineService {
                     let mut book = engine_clone.lock().await;
                     book.add_order(order)
                 };
+
 
                 // 3. Translation
                 let mut proto_events = Vec::new();
