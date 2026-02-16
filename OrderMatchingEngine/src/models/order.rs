@@ -4,7 +4,6 @@ pub enum Side {
     Ask,
 }
 
-// 2. 定義訂單類型
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum OrderType {
     Limit,

@@ -1,4 +1,4 @@
-use crate::models::order::{Order, Side};
+use crate::models::order::{Side};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum MatchEvent {
