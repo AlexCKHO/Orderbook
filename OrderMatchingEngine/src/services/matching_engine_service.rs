@@ -304,7 +304,9 @@ mod performance_tests {
     #[tokio::test]
     async fn bench_local_engine_performance() {
         let service = MatchingEngineService::new();
-        let iterations = 100_000;
+
+        // Reduce to 100_000 if 1M takes too long during local testing
+        let iterations = 1_000_000;
         let mut requests = Vec::with_capacity(iterations);
 
         for i in 0..iterations as u64 {
@@ -312,22 +314,44 @@ mod performance_tests {
         }
 
         println!("🚀 Starting Actor Benchmark with {} orders...", iterations);
+
+        // Pre-allocate vector to store per-request latencies in nanoseconds
+        let mut latencies = Vec::with_capacity(iterations);
+
         let start = Instant::now();
 
-        // 直接用 Helper 狂隊落 Actor 度
         for req in requests {
+            let req_start = Instant::now();
+
             let _ = MatchingEngineService::process_single_order(service.sender.clone(), req).await.unwrap();
+
+            latencies.push(req_start.elapsed().as_nanos() as u64);
         }
 
         let duration = start.elapsed();
         let tps = (iterations as f64 / duration.as_secs_f64()) as u64;
         let avg_latency = duration.as_nanos() / iterations as u128;
 
+        // Sort latencies to compute percentiles
+        // Using sort_unstable as it avoids allocation and is generally faster
+        latencies.sort_unstable();
+
+        let p50_ns = latencies[(iterations as f64 * 0.50) as usize];
+        let p99_ns = latencies[(iterations as f64 * 0.99) as usize];
+        let max_ns = *latencies.last().unwrap_or(&0);
+        
+        let p50_ms = p50_ns as f64 / iterations as f64;
+        let p99_ms = p99_ns as f64 / iterations as f64;
+        let max_ms = max_ns as f64 / iterations as f64;
+
         println!("-------------------------------------------");
         println!("🏁 Results:");
         println!("⏱️  Total Time: {:?}", duration);
         println!("📈 Throughput: {} TPS", tps);
         println!("📉 Avg Latency: {} ns per order", avg_latency);
+        println!("📊 Latency (p50): {:.3} ms", p50_ms);
+        println!("📊 Latency (p99): {:.3} ms", p99_ms);
+        println!("📊 Latency (Max): {:.3} ms", max_ms);
         println!("-------------------------------------------");
     }
 }
