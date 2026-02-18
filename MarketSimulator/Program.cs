@@ -9,7 +9,7 @@ namespace MarketSimulator;
 class Program
 {
     // Memory constraint warning: 100M objects consume ~10-15GB RAM
-    private const int TotalOrders = 1_000_000;
+    private const int TotalOrders = 10_000_000;
     private const string Address = "http://127.0.0.1:50051";
     private const int Concurrency = 4; 
 
