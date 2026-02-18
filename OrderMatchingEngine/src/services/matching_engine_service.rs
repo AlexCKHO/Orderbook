@@ -1,93 +1,106 @@
 use crate::models::order_book::OrderBook;
-use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tokio::sync::Mutex;
+use tokio::sync::{mpsc, oneshot};
 use tonic::{Request, Response, Status, Streaming};
 
 use futures::Stream;
 use std::pin::Pin;
-use tokio::sync::mpsc;
-use tokio_stream::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
 
-// Ref to Generated Code
+// Ref to Generated Code  
 use crate::orderbook_grpc::match_event::EventData;
 use crate::orderbook_grpc::matching_engine_server::MatchingEngine;
 use crate::orderbook_grpc::{
     self, OrderBatchRequest, OrderBatchResponse, OrderRequest, OrderResponse,
 };
 
-// Internal Models
-use crate::models::events::MatchEvent as InternalEvent;
+// Internal Models  
+use crate::models::events::{MatchEvent as InternalEvent, MatchEvent};
 use crate::models::order::{Order, OrderType, Side};
 
 pub struct MatchingEngineService {
-    engine: Arc<Mutex<OrderBook>>,
+    sender: mpsc::Sender<OrderCommand>,
+}
+
+enum OrderCommand {
+    PlaceOrder {
+        order: Order,
+        // Use oneshot channel, to send the result to gRPC handler  
+        resp: oneshot::Sender<Vec<InternalEvent>>,
+    },
+
+    PlaceOrderBatch {
+        orders: Vec<Order>,
+
+        resp: oneshot::Sender<u64>,
+    },
+}
+
+fn run_matching_actor(mut rx: mpsc::Receiver<OrderCommand>) {
+    tokio::spawn(async move {
+        let mut order_book = OrderBook::new();
+
+        while let Some(cmd) = rx.recv().await {
+            match cmd {
+                OrderCommand::PlaceOrder { order, resp } => {
+                    let events = order_book.add_order(order);
+
+                    let _ = resp.send(events);
+                }
+
+                OrderCommand::PlaceOrderBatch { orders, resp } => {
+                    let count = orders.len();
+
+                    for order in orders {
+                        order_book.add_order(order);
+                    }
+                    let _ = resp.send(count as u64);
+                }
+            }
+        }
+    });
 }
 
 impl MatchingEngineService {
     pub fn new() -> Self {
-        let order_book = OrderBook::new();
-        Self {
-            engine: Arc::new(Mutex::new(order_book)),
-        }
+        let (tx, rx) = mpsc::channel(100_000);
+
+        run_matching_actor(rx);
+
+        Self { sender: tx }
     }
 
-    // 🛠️ Helper Function: Extracts core logic to avoid code duplication
-    // This logic handles: Validation -> Conversion -> Matching -> Response Generation
-    async fn _process_order(&self, req: OrderRequest) -> Result<OrderResponse, Status> {
-        // --- A. Server Arrival Time ---
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos() as i64;
-
-        // --- B. Validation & Conversion ---
+    fn parse_proto_order(req: OrderRequest) -> Result<Order, Status> {
         let side = match req.side {
             1 => Side::Bid,
             2 => Side::Ask,
-            _ => return Err(Status::invalid_argument("Invalid side (1=BID, 2=ASK)")),
+            _ => return Err(Status::invalid_argument("Invalid Side")),
         };
 
         let order_type = match req.order_type {
             1 => OrderType::Limit,
             2 => OrderType::Market,
-            _ => {
-                return Err(Status::invalid_argument(
-                    "Invalid order type (1=LIMIT, 2=MARKET)",
-                ));
-            }
+            _ => return Err(Status::invalid_argument("Invalid Order Type")),
         };
 
-        if req.qty <= 0 {
-            return Err(Status::invalid_argument("Quantity must be > 0"));
-        }
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos() as i64;
 
-        if order_type == OrderType::Limit && req.price <= 0 {
-            return Err(Status::invalid_argument(
-                "Price must be > 0 for Limit Order",
-            ));
-        }
-
-        let order = Order {
+        Ok(Order {
             id: req.id,
             price: req.price,
             qty: req.qty,
             side,
             order_type,
             timestamp,
-        };
+        })
+    }
 
-        // --- C. Execution (Critical Section) ---
-        // Lock Engine -> Execute -> Auto-unlock
-        let internal_events = {
-            let mut engine = self.engine.lock().await;
-            engine.add_order(order)
-        };
-
-        // --- D. Translation ---
-        let mut proto_events = Vec::new();
-        for event in internal_events {
+    fn parse_to_grpc_events(events: Vec<MatchEvent>) -> Vec<orderbook_grpc::MatchEvent> {
+        let mut result = Vec::new();
+        for event in events {
             let event_data = match event {
                 InternalEvent::OrderPlaced {
                     id,
@@ -123,35 +136,94 @@ impl MatchingEngineService {
                     EventData::Killed(orderbook_grpc::OrderKilled { id, killed_qty })
                 }
             };
-            proto_events.push(orderbook_grpc::MatchEvent {
+            result.push(orderbook_grpc::MatchEvent {
                 event_data: Some(event_data),
             });
         }
 
-        // --- E. Return Response ---
+        return result;
+    }
+
+    async fn process_single_order(
+        sender: mpsc::Sender<OrderCommand>,
+        req: OrderRequest,
+    ) -> Result<OrderResponse, Status> {
+        let order = Self::parse_proto_order(req)?;
+
+        let (resp_tx, resp_rx) = oneshot::channel();
+        let cmd = OrderCommand::PlaceOrder {
+            order,
+            resp: resp_tx,
+        };
+
+        if sender.send(cmd).await.is_err() {
+            return Err(Status::internal("Engine dead"));
+        }
+        let internal_events = resp_rx.await.map_err(|_| Status::internal("Actor died"))?;
+
+        let proto_events = Self::parse_to_grpc_events(internal_events);
+
         Ok(OrderResponse {
             success: true,
             message: "".to_string(),
             events: proto_events,
-            request_id: req.id, // 🔥 Critical: Must return ID to Client for Latency calculation
+            request_id: req.id,
+        })
+    }
+
+    async fn process_batch_orders(
+        sender: mpsc::Sender<OrderCommand>,
+        batch_req: OrderBatchRequest,
+    ) -> Result<OrderBatchResponse, Status> {
+        let mut orders = Vec::with_capacity(batch_req.orders.len());
+
+        for req in batch_req.orders {
+            if let Ok(order) = Self::parse_proto_order(req) {
+                orders.push(order);
+            }
+        }
+
+        if orders.is_empty() {
+            return Ok(OrderBatchResponse {
+                success: true,
+                message: "".to_string(),
+                processed_count: 0,
+            });
+        };
+
+        let (resp_tx, resp_rx) = oneshot::channel();
+        let cmd = OrderCommand::PlaceOrderBatch {
+            orders,
+            resp: resp_tx,
+        };
+
+        if sender.send(cmd).await.is_err() {
+            return Err(Status::internal("Engine dead"));
+        }
+
+        let count = resp_rx.await.map_err(|_| Status::internal("Actor dead"))?;
+
+        Ok(OrderBatchResponse {
+            success: true,
+            message: "".to_string(),
+            processed_count: count,
         })
     }
 }
 
 #[tonic::async_trait]
 impl MatchingEngine for MatchingEngineService {
-    // 1. Single Request (Retained for compatibility)
+    // 1. Single Request (Retained for compatibility)  
     async fn place_order(
         &self,
         request: Request<OrderRequest>,
     ) -> Result<Response<OrderResponse>, Status> {
-        let req = request.into_inner();
-        // Call helper directly
-        let response = self._process_order(req).await?;
-        Ok(Response::new(response))
+        let resp = Self::process_single_order(self.sender.clone(), request.into_inner()).await?;
+
+        Ok(Response::new(resp))
     }
 
-    // 🔥 2. Bidirectional Streaming (Streaming Implementation)
+    // 🔥 2. Bidirectional Streaming (Streaming Implementation)    
     type PlaceOrderStreamStream = Pin<Box<dyn Stream<Item = Result<OrderResponse, Status>> + Send>>;
 
     async fn place_order_stream(
@@ -160,114 +232,22 @@ impl MatchingEngine for MatchingEngineService {
     ) -> Result<Response<Self::PlaceOrderStreamStream>, Status> {
         println!("🌊 Streaming connection established...");
         let mut in_stream = request.into_inner();
-
-        // To use `self` inside tokio::spawn, we need to clone the Arc pointer (if engine is Arc).
-        // Since self.engine is Arc, we can clone it and move it into the task.
-        // We avoid calling self._process_order because of lifetime issues with &self in a spawned task.
-
-        let engine_clone = self.engine.clone(); // Clone Arc<Mutex<>>
-
-        // Create Channel (Buffer = 10000)
+        let actor_sender = self.sender.clone();
         let (tx, rx) = mpsc::channel(10000);
 
         tokio::spawn(async move {
             while let Ok(Some(req)) = in_stream.message().await {
-                // Logic Start: Manually executing processing logic to avoid self lifetime issues
-
-                // 1. Validation (Simplified version for speed, real projects should wrap this in a fn)
-                let side_res = match req.side {
-                    1 => Ok(Side::Bid),
-                    2 => Ok(Side::Ask),
-                    _ => Err(()),
-                };
-                let type_res = match req.order_type {
-                    1 => Ok(OrderType::Limit),
-                    2 => Ok(OrderType::Market),
-                    _ => Err(()),
-                };
-
-                if side_res.is_err() || type_res.is_err() {
-                    continue;
-                } // Skip invalid orders
-                let side = side_res.unwrap();
-                let order_type = type_res.unwrap();
-
-                let timestamp = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_nanos() as i64;
-                let order = Order {
-                    id: req.id,
-                    price: req.price,
-                    qty: req.qty,
-                    side,
-                    order_type,
-                    timestamp,
-                };
-
-                // 2. Execution
-                let internal_events = {
-                    let mut book = engine_clone.lock().await;
-                    book.add_order(order)
-                };
-
-                // 3. Translation
-                let mut proto_events = Vec::new();
-                for event in internal_events {
-                    let event_data = match event {
-                        InternalEvent::OrderPlaced {
-                            id,
-                            price,
-                            qty,
-                            side,
-                        } => EventData::Placed(orderbook_grpc::OrderPlaced {
-                            id,
-                            price,
-                            qty,
-                            side: match side {
-                                Side::Bid => 1,
-                                Side::Ask => 2,
-                            },
-                        }),
-                        InternalEvent::TradeExecuted {
-                            maker_id,
-                            taker_id,
-                            price,
-                            qty,
-                            timestamp,
-                        } => EventData::Filled(orderbook_grpc::TradeExecuted {
-                            maker_id,
-                            taker_id,
-                            price,
-                            qty,
-                            timestamp: timestamp as i64,
-                        }),
-                        _ => continue, // Skipping Cancel/Kill for brevity
-                    };
-                    proto_events.push(orderbook_grpc::MatchEvent {
-                        event_data: Some(event_data),
-                    });
-                }
-
-                let response = OrderResponse {
-                    success: true,
-                    message: "".to_string(),
-                    events: proto_events,
-                    request_id: req.id, // Echo ID
-                };
-                // --- Logic End ---
-
-                // Send response; if it fails (Client disconnected), break the loop
-                if tx.send(Ok(response)).await.is_err() {
-                    break;
+                if let Ok(response) = Self::process_single_order(actor_sender.clone(), req).await {
+                    if tx.send(Ok(response)).await.is_err() {
+                        break;
+                    }
                 }
             }
             println!("👋 Stream closed");
         });
 
-        let out_stream = ReceiverStream::new(rx);
         Ok(Response::new(
-            Box::pin(out_stream) as Self::PlaceOrderStreamStream
+            Box::pin(ReceiverStream::new(rx)) as Self::PlaceOrderStreamStream
         ))
     }
 
@@ -280,71 +260,28 @@ impl MatchingEngine for MatchingEngineService {
         println!("📦 Batch Streaming connection established!");
 
         let mut in_stream = request.into_inner();
-        let engine_clone = self.engine.clone(); // Clone Arc pointer
-
-        // Create Channel (Buffer = 100)
+        let actor_sender = self.sender.clone();
         let (tx, rx) = mpsc::channel(100);
 
         tokio::spawn(async move {
-            while let Ok(Some(batch)) = in_stream.message().await {
-                let count = batch.orders.len();
-
-                // 🔥 LOCK COARSENING
-                // Lock once, process N orders
+            while let Ok(Some(batch_req)) = in_stream.message().await {
+                if let Ok(response) =
+                    Self::process_batch_orders(actor_sender.clone(), batch_req).await
                 {
-                    let mut engine = engine_clone.lock().await; // 🔒 Locked
-
-                    for req in batch.orders {
-                        // --- Logic Start ---
-                        let side = match req.side {
-                            1 => Side::Bid,
-                            2 => Side::Ask,
-                            _ => continue,
-                        };
-                        let order_type = match req.order_type {
-                            1 => OrderType::Limit,
-                            2 => OrderType::Market,
-                            _ => continue,
-                        };
-                        let timestamp = SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .unwrap()
-                            .as_nanos() as i64;
-
-                        let order = Order {
-                            id: req.id,
-                            price: req.price,
-                            qty: req.qty,
-                            side,
-                            order_type,
-                            timestamp,
-                        };
-
-                        engine.add_order(order); // Pure in-memory operation
-                        // --- Logic End ---
+                    if tx.send(Ok(response)).await.is_err() {
+                        break;
                     }
                 }
-
-                // Reply to Client
-                let response = OrderBatchResponse {
-                    success: true,
-                    message: "".to_string(),
-                    processed_count: count as u64,
-                };
-
-                if tx.send(Ok(response)).await.is_err() {
-                    break;
-                }
             }
-            println!("👋 Batch Stream closed");
+            println!("👋 Stream closed");
         });
 
-        let out_stream = ReceiverStream::new(rx);
         Ok(Response::new(
-            Box::pin(out_stream) as Self::PlaceBatchStreamStream
+            Box::pin(ReceiverStream::new(rx)) as Self::PlaceBatchStreamStream
         ))
     }
 }
+
 
 #[cfg(test)]
 mod performance_tests {
@@ -352,16 +289,14 @@ mod performance_tests {
     use rand::Rng;
     use std::time::Instant;
 
-    // 1:1 replica of the C# Random Order Logic
     fn generate_random_request(index: u64) -> OrderRequest {
         let mut rng = rand::thread_rng();
         OrderRequest {
             id: 1_000_000 + index,
-            price: rng.gen_range(100..201), // C# Random.Shared.Next(100, 201)
-            qty: rng.gen_range(1..100),     // C# Random.Shared.Next(1, 100)
-            side: if rng.gen_bool(0.5) { 1 } else { 2 }, // 1=Bid, 2=Ask
-            order_type: 1,                  // Limit Order
-            // Note: Timestamp is fetched as Server Time in _process_order, so dummy value here
+            price: rng.gen_range(100..201),
+            qty: rng.gen_range(1..100),
+            side: if rng.gen_bool(0.5) { 1 } else { 2 },
+            order_type: 1,
             timestamp: 0,
         }
     }
@@ -369,35 +304,53 @@ mod performance_tests {
     #[tokio::test]
     async fn bench_local_engine_performance() {
         let service = MatchingEngineService::new();
-        let iterations = 100_000; // Run 100,000 orders to test
+
+        // Reduce to 100_000 if 1M takes too long during local testing  
+        let iterations = 1_000_000;
         let mut requests = Vec::with_capacity(iterations);
 
-        // 1. Pre-generate data (not included in Matching time)
         for i in 0..iterations as u64 {
             requests.push(generate_random_request(i));
         }
 
-        println!("🚀 Starting Performance Test with {} orders...", iterations);
+        println!("🚀 Starting Actor Benchmark with {} orders...", iterations);
 
-        // 2. Start timing
+        // Pre-allocate vector to store per-request latencies in nanoseconds  
+        let mut latencies = Vec::with_capacity(iterations);
+
         let start = Instant::now();
 
         for req in requests {
-            // Call the Helper Function directly
-            let _ = service._process_order(req).await.unwrap();
+            let req_start = Instant::now();
+
+            let _ = MatchingEngineService::process_single_order(service.sender.clone(), req).await.unwrap();
+
+            latencies.push(req_start.elapsed().as_nanos() as u64);
         }
 
         let duration = start.elapsed();
-
-        // 3. Calculate results
         let tps = (iterations as f64 / duration.as_secs_f64()) as u64;
         let avg_latency = duration.as_nanos() / iterations as u128;
+
+        // Sort latencies to compute percentiles  
+        // Using sort_unstable as it avoids allocation and is generally faster        latencies.sort_unstable();  
+
+        let p50_ns = latencies[(iterations as f64 * 0.50) as usize];
+        let p99_ns = latencies[(iterations as f64 * 0.99) as usize];
+        let max_ns = *latencies.last().unwrap_or(&0);
+
+        let p50_ms = p50_ns as f64 / iterations as f64;
+        let p99_ms = p99_ns as f64 / iterations as f64;
+        let max_ms = max_ns as f64 / iterations as f64;
 
         println!("-------------------------------------------");
         println!("🏁 Results:");
         println!("⏱️  Total Time: {:?}", duration);
-        println!("📈 Throughput: {} TPS (Orders per second)", tps);
+        println!("📈 Throughput: {} TPS", tps);
         println!("📉 Avg Latency: {} ns per order", avg_latency);
+        println!("📊 Latency (p50): {:.3} ms", p50_ms);
+        println!("📊 Latency (p99): {:.3} ms", p99_ms);
+        println!("📊 Latency (Max): {:.3} ms", max_ms);
         println!("-------------------------------------------");
     }
 }
