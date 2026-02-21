@@ -7,14 +7,14 @@ use futures::Stream;
 use std::pin::Pin;
 use tokio_stream::wrappers::ReceiverStream;
 
-// Protobuf generated types
+// Ref to Generated Code
 use crate::orderbook_grpc::match_event::EventData;
 use crate::orderbook_grpc::matching_engine_server::MatchingEngine;
 use crate::orderbook_grpc::{
     self, OrderBatchRequest, OrderBatchResponse, OrderRequest, OrderResponse,
 };
 
-// Internal domain models
+// Internal Models
 use crate::models::events::{MatchEvent as InternalEvent, MatchEvent};
 use crate::models::order::{Order, OrderType, Side};
 
@@ -23,22 +23,16 @@ pub struct MatchingEngineService {
 }
 
 enum OrderCommand {
-    // Standard single order processing (for unary APIs)
     PlaceOrder {
         order: Order,
+        // Use oneshot channel, to send the result to gRPC handler
         resp: oneshot::Sender<Vec<InternalEvent>>,
     },
-    // Standard batch processing (kept for backward compatibility)
+
     PlaceOrderBatch {
         orders: Vec<Order>,
-        resp: oneshot::Sender<u64>,
-    },
 
-    // High-throughput, lock-free batch processing for streaming clients
-    PlaceOrderBatchStream {
-        orders: Vec<Order>,
-        // Passes the gRPC response channel directly to the actor to minimize overhead
-        responder: mpsc::Sender<Result<OrderBatchResponse, Status>>,
+        resp: oneshot::Sender<u64>,
     },
 }
 
@@ -48,39 +42,19 @@ fn run_matching_actor(mut rx: mpsc::Receiver<OrderCommand>) {
 
         while let Some(cmd) = rx.recv().await {
             match cmd {
-                // Handle standard unary requests
                 OrderCommand::PlaceOrder { order, resp } => {
                     let events = order_book.add_order(order);
+
                     let _ = resp.send(events);
                 }
+
                 OrderCommand::PlaceOrderBatch { orders, resp } => {
                     let count = orders.len();
+
                     for order in orders {
                         order_book.add_order(order);
                     }
                     let _ = resp.send(count as u64);
-                }
-
-                // Async pipeline for streaming requests
-                OrderCommand::PlaceOrderBatchStream { orders, responder } => {
-                    let count = orders.len();
-
-                    // 1. CPU-bound matching (blocks the actor loop intentionally to avoid context switching)
-                    for order in orders {
-                        order_book.add_order(order);
-                    }
-
-                    // 2. Prepare the response
-                    let resp = OrderBatchResponse {
-                        success: true,
-                        message: "".to_string(),
-                        processed_count: count as u64,
-                    };
-
-                    // 3. Fire-and-forget response delivery.
-                    // Using try_send here is critical: the actor loop must never yield or block on an await.
-                    // As long as the channel has capacity, this takes nanoseconds.
-                    let _ = responder.try_send(Ok(resp));
                 }
             }
         }
@@ -196,11 +170,50 @@ impl MatchingEngineService {
             request_id: req.id,
         })
     }
+
+    async fn process_batch_orders(
+        sender: mpsc::Sender<OrderCommand>,
+        batch_req: OrderBatchRequest,
+    ) -> Result<OrderBatchResponse, Status> {
+        let mut orders = Vec::with_capacity(batch_req.orders.len());
+
+        for req in batch_req.orders {
+            if let Ok(order) = Self::parse_proto_order(req) {
+                orders.push(order);
+            }
+        }
+
+        if orders.is_empty() {
+            return Ok(OrderBatchResponse {
+                success: true,
+                message: "".to_string(),
+                processed_count: 0,
+            });
+        };
+
+        let (resp_tx, resp_rx) = oneshot::channel();
+        let cmd = OrderCommand::PlaceOrderBatch {
+            orders,
+            resp: resp_tx,
+        };
+
+        if sender.send(cmd).await.is_err() {
+            return Err(Status::internal("Engine dead"));
+        }
+
+        let count = resp_rx.await.map_err(|_| Status::internal("Actor dead"))?;
+
+        Ok(OrderBatchResponse {
+            success: true,
+            message: "".to_string(),
+            processed_count: count,
+        })
+    }
 }
 
 #[tonic::async_trait]
 impl MatchingEngine for MatchingEngineService {
-    // 1. Unary request (retained for backward compatibility)
+    // 1. Single Request (Retained for compatibility)
     async fn place_order(
         &self,
         request: Request<OrderRequest>,
@@ -210,7 +223,7 @@ impl MatchingEngine for MatchingEngineService {
         Ok(Response::new(resp))
     }
 
-    // 2. Bidirectional streaming implementations
+    // 🔥 2. Bidirectional Streaming (Streaming Implementation)
     type PlaceOrderStreamStream = Pin<Box<dyn Stream<Item = Result<OrderResponse, Status>> + Send>>;
 
     async fn place_order_stream(
@@ -238,43 +251,24 @@ impl MatchingEngine for MatchingEngineService {
         ))
     }
 
-    type PlaceBatchStreamStream = Pin<Box<dyn Stream<Item = Result<OrderBatchResponse, Status>> + Send>>;
-
+    type PlaceBatchStreamStream =
+    Pin<Box<dyn Stream<Item = Result<OrderBatchResponse, Status>> + Send>>;
     async fn place_batch_stream(
         &self,
         request: Request<Streaming<OrderBatchRequest>>,
     ) -> Result<Response<Self::PlaceBatchStreamStream>, Status> {
-        println!("📦 [ASYNC PIPELINE] Batch Streaming connection established!");
+        println!("📦 Batch Streaming connection established!");
 
         let mut in_stream = request.into_inner();
         let actor_sender = self.sender.clone();
-
-        // Note: Using a large buffer (e.g., 100k) is crucial here.
-        // It prevents backpressure from overwhelming the channel when the actor processes large bursts of orders.
-        let (tx, rx) = mpsc::channel(100_000);
+        let (tx, rx) = mpsc::channel(100);
 
         tokio::spawn(async move {
-            // Receiver task: Dedicated to draining network I/O as fast as possible.
             while let Ok(Some(batch_req)) = in_stream.message().await {
-                let mut orders = Vec::with_capacity(batch_req.orders.len());
-
-                for req in batch_req.orders {
-                    if let Ok(order) = Self::parse_proto_order(req) {
-                        orders.push(order);
-                    }
-                }
-
-                if !orders.is_empty() {
-                    // Package the orders alongside the response channel sender.
-                    let cmd = OrderCommand::PlaceOrderBatchStream {
-                        orders,
-                        responder: tx.clone(),
-                    };
-
-                    // Dispatch to the matching engine actor.
-                    // This is entirely fire-and-forget. We immediately loop back for the next batch without awaiting results.
-                    if actor_sender.send(cmd).await.is_err() {
-                        println!("🛑 Engine actor dead");
+                if let Ok(response) =
+                    Self::process_batch_orders(actor_sender.clone(), batch_req).await
+                {
+                    if tx.send(Ok(response)).await.is_err() {
                         break;
                     }
                 }
@@ -285,9 +279,9 @@ impl MatchingEngine for MatchingEngineService {
         Ok(Response::new(
             Box::pin(ReceiverStream::new(rx)) as Self::PlaceBatchStreamStream
         ))
-   
     }
 }
+
 
 #[cfg(test)]
 mod performance_tests {
@@ -339,8 +333,7 @@ mod performance_tests {
         let avg_latency = duration.as_nanos() / iterations as u128;
 
         // Sort latencies to compute percentiles
-        // Using sort_unstable as it avoids allocation and is generally faster
-        latencies.sort_unstable();
+        // Using sort_unstable as it avoids allocation and is generally faster        latencies.sort_unstable();
 
         let p50_ns = latencies[(iterations as f64 * 0.50) as usize];
         let p99_ns = latencies[(iterations as f64 * 0.99) as usize];
