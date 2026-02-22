@@ -11,7 +11,7 @@ class Program
     // Memory constraint warning: 100M objects consume ~10-15GB RAM
     private const int TotalOrders = 10_000_000;
     private const string Address = "http://127.0.0.1:50051";
-    private const int Concurrency = 4; 
+    private const int Concurrency = 4;
 
     static async Task Main(string[] args)
     {
@@ -20,21 +20,21 @@ class Program
         {
             EnableMultipleHttp2Connections = true,
 
-            ConnectTimeout = TimeSpan.FromSeconds(5) 
+            ConnectTimeout = TimeSpan.FromSeconds(5)
         };
 
-        using var channel = GrpcChannel.ForAddress(Address, new GrpcChannelOptions 
-        { 
+        using var channel = GrpcChannel.ForAddress(Address, new GrpcChannelOptions
+        {
             HttpHandler = httpHandler,
             // Bump buffer limits to support massive throughput during batching
-            MaxReceiveMessageSize = 16 * 1024 * 1024, 
+            MaxReceiveMessageSize = 16 * 1024 * 1024,
             MaxSendMessageSize = 16 * 1024 * 1024
         });
-        
+
         var client = new MatchingEngine.MatchingEngineClient(channel);
 
         Console.WriteLine($"⚡ [SETUP] Pre-generating {TotalOrders:N0} orders in RAM...");
-        
+
         // Pre-allocate objects to isolate GC overhead from our benchmark measurements
         var requests = Enumerable.Range(0, TotalOrders).Select(i => GenerateRandomOrder(i)).ToArray();
 
@@ -65,12 +65,12 @@ class Program
     private static async Task RunStreamingTest(MatchingEngine.MatchingEngineClient client, OrderRequest[] orders)
     {
         // Scale concurrency based on logical cores (typically 4-8 yields the best throughput)
-        
+
         Console.WriteLine($"🚀 Launching HFT Streaming ({Concurrency} Concurrent Streams)...");
-        
+
         var sentTimestamps = new ConcurrentDictionary<ulong, long>();
         var latencies = new ConcurrentBag<double>();
-        
+
         var sw = Stopwatch.StartNew();
         int successCount = 0;
 
@@ -96,7 +96,8 @@ class Program
                         {
                             latencies.Add(GetElapsedMs(startTicks));
                         }
-                        if (resp.Success) 
+
+                        if (resp.Success)
                         {
                             Interlocked.Increment(ref successCount);
                         }
@@ -110,8 +111,8 @@ class Program
                     {
                         sentTimestamps[req.Id] = Stopwatch.GetTimestamp();
                     }
-                    
-                    await call.RequestStream.WriteAsync(req); 
+
+                    await call.RequestStream.WriteAsync(req);
                 }
 
                 await call.RequestStream.CompleteAsync();
@@ -132,73 +133,81 @@ class Program
     // ==========================================
     private static async Task RunBatchingTest(MatchingEngine.MatchingEngineClient client, OrderRequest[] orders)
     {
-        const int BatchSize = 100;
-        
+        const int BatchSize = 5000;
+        const int repeat = 5;
+
         Console.WriteLine($"\n🚀 [BENCHMARK] Starting Batching (Size: {BatchSize}, Streams: {Concurrency})...");
-        
+
         // Pre-compute all batches to keep allocation out of the benchmark hot loop
         var batches = orders.Chunk(BatchSize).Select(chunk => new OrderBatchRequest
         {
             Orders = { chunk }
         }).ToArray();
-
-        var latencies = new ConcurrentBag<double>();
-        int totalProcessed = 0;
-
-        // Partition batches across concurrent tasks
+        
+        
         int chunkSize = batches.Length / Concurrency;
-        var tasks = new List<Task>();
-
-        var sw = Stopwatch.StartNew();
-
-        for (int i = 0; i < Concurrency; i++)
+       
+        for (int k = 0; k < repeat; k++)
         {
-            int taskIndex = i;
-            var batchChunk = batches.Skip(taskIndex * chunkSize).Take(chunkSize).ToArray();
+            var latencies = new ConcurrentBag<double>();
+            int totalProcessed = 0;
 
-            tasks.Add(Task.Run(async () =>
+            // Partition batches across concurrent tasks
+            
+            var tasks = new List<Task>();
+
+            var sw = Stopwatch.StartNew();
+
+            
+            for (int i = 0; i < Concurrency; i++)
             {
-                using var call = client.PlaceBatchStream();
-                
-                // Each stream maintains its own FIFO queue for precise latency tracking 
-                // avoiding global lock contention
-                var batchTimestamps = new ConcurrentQueue<long>();
+                int taskIndex = i;
+                var batchChunk = batches.Skip(taskIndex * chunkSize).Take(chunkSize).ToArray();
 
-                // Background reader to process ACKs asynchronously
-                var reader = Task.Run(async () =>
+                tasks.Add(Task.Run(async () =>
                 {
-                    await foreach (var resp in call.ResponseStream.ReadAllAsync())
+                    using var call = client.PlaceBatchStream();
+
+                    // Each stream maintains its own FIFO queue for precise latency tracking 
+                    // avoiding global lock contention
+                    var batchTimestamps = new ConcurrentQueue<long>();
+
+                    // Background reader to process ACKs asynchronously
+                    var reader = Task.Run(async () =>
                     {
-                        // Map responses back to requests assuming strict FIFO ordering per stream
-                        if (batchTimestamps.TryDequeue(out long startTicks) && startTicks > 0)
+                        await foreach (var resp in call.ResponseStream.ReadAllAsync())
                         {
-                            latencies.Add(GetElapsedMs(startTicks));
+                            // Map responses back to requests assuming strict FIFO ordering per stream
+                            if (batchTimestamps.TryDequeue(out long startTicks) && startTicks > 0)
+                            {
+                                latencies.Add(GetElapsedMs(startTicks));
+                            }
+
+                            Interlocked.Add(ref totalProcessed, (int)resp.ProcessedCount);
                         }
-                        
-                        Interlocked.Add(ref totalProcessed, (int)resp.ProcessedCount);
+                    });
+
+                    // Hot path for sending batches
+                    for (int j = 0; j < batchChunk.Length; j++)
+                    {
+                        // Sample every 100th batch per stream. (-1 implies ignored sample)
+                        long timestampToQueue = (j % 100 == 0) ? Stopwatch.GetTimestamp() : -1;
+
+                        // Enqueue timestamp *before* sending to prevent race conditions with the reader task
+                        batchTimestamps.Enqueue(timestampToQueue);
+                        await call.RequestStream.WriteAsync(batchChunk[j]);
                     }
-                });
 
-                // Hot path for sending batches
-                for (int j = 0; j < batchChunk.Length; j++)
-                {
-                    // Sample every 100th batch per stream. (-1 implies ignored sample)
-                    long timestampToQueue = (j % 100 == 0) ? Stopwatch.GetTimestamp() : -1;
+                    await call.RequestStream.CompleteAsync();
+                    await reader;
+                }));
+            }
 
-                    // Enqueue timestamp *before* sending to prevent race conditions with the reader task
-                    batchTimestamps.Enqueue(timestampToQueue);
-                    await call.RequestStream.WriteAsync(batchChunk[j]);
-                }
+            await Task.WhenAll(tasks);
+            sw.Stop();
 
-                await call.RequestStream.CompleteAsync();
-                await reader;
-            }));
+            PrintReport($"MULTI-BATCHING (x{Concurrency})", sw, totalProcessed, latencies);
         }
-
-        await Task.WhenAll(tasks);
-        sw.Stop();
-
-        PrintReport($"MULTI-BATCHING (x{Concurrency})", sw, totalProcessed, latencies);
     }
 
     private static OrderRequest GenerateRandomOrder(int index)
@@ -208,7 +217,7 @@ class Program
             Id = (ulong)(1000000 + index),
             Price = (ulong)Random.Shared.Next(100, 201),
             Qty = (ulong)Random.Shared.Next(1, 100),
-            Side = Random.Shared.Next(0, 2) == 0 ? Side.Bid : Side.Ask, 
+            Side = Random.Shared.Next(0, 2) == 0 ? Side.Bid : Side.Ask,
             OrderType = OrderType.Limit,
             Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
         };
@@ -224,7 +233,7 @@ class Program
         // Filter out ignored samples (-1) and sort for percentile calculation
         var sorted = latencies.Where(x => x >= 0).OrderBy(x => x).ToArray();
         double p50 = 0, p99 = 0, max = 0;
-        
+
         if (sorted.Length > 0)
         {
             p50 = sorted[sorted.Length / 2];
