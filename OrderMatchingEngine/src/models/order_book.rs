@@ -134,10 +134,6 @@ impl OrderBook {
     }
 
     pub fn add_order_to_bids(&mut self, new_bid_order: Order, events: &mut Vec<MatchEvent>) {
-        self.bids
-            .entry(new_bid_order.price) // 1. Locate the specific price level in the bid side of the book
-            .or_insert_with(VecDeque::new) // 2. If the price level is empty, initialize a new queue
-            .push_back(new_bid_order.clone()); // 3. Append the order to the end to maintain time priority (FIFO)
         self.order_locations
             .insert(new_bid_order.id, (new_bid_order.price, Side::Bid));
 
@@ -147,13 +143,13 @@ impl OrderBook {
             qty: new_bid_order.qty,
             side: new_bid_order.side,
         });
+        self.bids
+            .entry(new_bid_order.price) // 1. Locate the specific price level in the bid side of the book
+            .or_insert_with(VecDeque::new) // 2. If the price level is empty, initialize a new queue
+            .push_back(new_bid_order); // 3. Append the order to the end to maintain time priority (FIFO)
     }
 
     pub fn add_order_to_asks(&mut self, new_ask_order: Order, events: &mut Vec<MatchEvent>) {
-        self.asks
-            .entry(new_ask_order.price) // 1. Check if this price level already exists in the book
-            .or_insert_with(VecDeque::new) // 2. If not, create a new "queue" (VecDeque) for this price
-            .push_back(new_ask_order.clone()); // 3. Add the order to the end of the queue (FIFO)
         self.order_locations
             .insert(new_ask_order.id, (new_ask_order.price, Side::Ask));
 
@@ -163,6 +159,10 @@ impl OrderBook {
             qty: new_ask_order.qty,
             side: new_ask_order.side,
         });
+        self.asks
+            .entry(new_ask_order.price) // 1. Check if this price level already exists in the book
+            .or_insert_with(VecDeque::new) // 2. If not, create a new "queue" (VecDeque) for this price
+            .push_back(new_ask_order); // 3. Add the order to the end of the queue (FIFO)
     }
 }
 #[cfg(test)]
