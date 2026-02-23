@@ -18,7 +18,7 @@ pub struct Order {
     pub side: Side,
     pub order_type: OrderType,
     // Notes: Why timestamp:
-    
+
     // 1. Audit Trail & Dispute Resolution
     // If two orders are submitted at the same price (e.g., both at $100), why was Order A filled while Order B remained unfilled? A timestamp is essential to prove that Order A arrived before Order B, thereby validating the integrity of the FIFO (First-In-First-Out) / Price-Time Priority logic.
     //
@@ -37,7 +37,7 @@ pub struct OrderEntry {
     pub id: u64,
     pub price: u64,
     pub qty: u64,
-    
+
 }
 
 impl OrderEntry {

@@ -6,7 +6,7 @@ pub struct OrderBook {
     // FIFO;
     pub asks: BTreeMap<u64, VecDeque<Order>>,
     pub bids: BTreeMap<u64, VecDeque<Order>>,
-
+    // Order.id, (Order.pice, Side)
     pub order_locations: HashMap<u64, (u64, Side)>,
 }
 
@@ -163,6 +163,14 @@ impl OrderBook {
             .entry(new_ask_order.price) // 1. Check if this price level already exists in the book
             .or_insert_with(VecDeque::new) // 2. If not, create a new "queue" (VecDeque) for this price
             .push_back(new_ask_order); // 3. Add the order to the end of the queue (FIFO)
+    }
+
+    pub fn cancel_order(&mut self, order_id: u64, events: &mut Vec<MatchEvent>) {
+        if let Some(order) = self.order_locations.get(&order_id) {
+            let price: u64 = order.0;
+            let side: Side = order.1;
+        } else {
+        }
     }
 }
 #[cfg(test)]

@@ -126,7 +126,7 @@ impl MatchingEngineService {
             qty: req.qty,
             side,
             order_type,
-            timestamp,
+            timestamp
         })
     }
 
@@ -307,75 +307,3 @@ impl MatchingEngine for MatchingEngineService {
     }
 }
 
-#[cfg(test)]
-mod performance_tests {
-    use super::*;
-    use rand::Rng;
-    use std::time::Instant;
-
-    fn generate_random_request(index: u64) -> OrderRequest {
-        let mut rng = rand::thread_rng();
-        OrderRequest {
-            id: 1_000_000 + index,
-            price: rng.gen_range(100..201),
-            qty: rng.gen_range(1..100),
-            side: if rng.gen_bool(0.5) { 1 } else { 2 },
-            order_type: 1,
-            timestamp: 0,
-        }
-    }
-
-    #[tokio::test]
-    async fn bench_local_engine_performance() {
-        let service = MatchingEngineService::new();
-
-        // Reduce to 100_000 if 1M takes too long during local testing
-        let iterations = 1_000_000;
-        let mut requests = Vec::with_capacity(iterations);
-
-        for i in 0..iterations as u64 {
-            requests.push(generate_random_request(i));
-        }
-
-        println!("Starting actor benchmark with {} orders...", iterations);
-
-        // Pre-allocate vector to store per-request latencies in nanoseconds
-        let mut latencies = Vec::with_capacity(iterations);
-
-        let start = Instant::now();
-
-        for req in requests {
-            let req_start = Instant::now();
-
-            let _ = MatchingEngineService::process_single_order(service.sender.clone(), req).await.unwrap();
-
-            latencies.push(req_start.elapsed().as_nanos() as u64);
-        }
-
-        let duration = start.elapsed();
-        let tps = (iterations as f64 / duration.as_secs_f64()) as u64;
-        let avg_latency = duration.as_nanos() / iterations as u128;
-
-        // Sort latencies to compute percentiles
-        // Using sort_unstable as it avoids allocation and is generally faster
-        latencies.sort_unstable();
-
-        let p50_ns = latencies[(iterations as f64 * 0.50) as usize];
-        let p99_ns = latencies[(iterations as f64 * 0.99) as usize];
-        let max_ns = *latencies.last().unwrap_or(&0);
-
-        let p50_ms = p50_ns as f64 / iterations as f64;
-        let p99_ms = p99_ns as f64 / iterations as f64;
-        let max_ms = max_ns as f64 / iterations as f64;
-
-        println!("-------------------------------------------");
-        println!("Results:");
-        println!("Total Time: {:?}", duration);
-        println!("Throughput: {} TPS", tps);
-        println!("Avg Latency: {} ns per order", avg_latency);
-        println!("Latency (p50): {:.3} ms", p50_ms);
-        println!("Latency (p99): {:.3} ms", p99_ms);
-        println!("Latency (Max): {:.3} ms", max_ms);
-        println!("-------------------------------------------");
-    }
-}
