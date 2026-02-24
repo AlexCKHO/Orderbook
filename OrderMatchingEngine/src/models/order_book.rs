@@ -1,6 +1,8 @@
-use crate::models::events::MatchEvent;
+use crate::models::events::{CancelRejectReason, MatchEvent};
 use crate::models::order::{Order, OrderEntry, OrderType, Side};
 use std::collections::{BTreeMap, HashMap, VecDeque};
+use crate::models::events::MatchEvent::CancelRejected;
+
 // Note: Orderbook on Tokio Integrating Sync Logic with Async Runtime
 pub struct OrderBook {
     // FIFO;
@@ -170,6 +172,7 @@ impl OrderBook {
             let price: u64 = order.0;
             let side: Side = order.1;
         } else {
+            events.push(CancelRejected {id: order_id, reason: CancelRejectReason::OrderNotFound})
         }
     }
 }
