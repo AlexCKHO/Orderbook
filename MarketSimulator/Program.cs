@@ -54,7 +54,22 @@ class Program
         }
         else
         {
-            await RunBatchingTest(client, requests);
+            int[] testBatchSizes = { 5000 };
+
+            Console.WriteLine($"\n🕵️‍♂️ 啟動自動尋找最佳 Batch Size (Sweet Spot) 測試...");
+            Console.WriteLine($"| Batch Size | TPS (Orders/sec) | Latency p50 (ms) | Latency p99 (ms) |");
+            Console.WriteLine($"|------------|------------------|------------------|------------------|");
+            
+            
+            foreach (var size in testBatchSizes)
+            {
+                // 1. 執行 GC 清理
+                GC.Collect();
+    
+                // 2. 執行你寫好嘅 Batching 測試 (但今次傳入變數 size)
+                await RunBatchingTest(client, requests, size);
+
+            }
         }
     }
 
@@ -131,34 +146,34 @@ class Program
     // MODE 2: BATCHING
     // Tracks latency using strict FIFO assumptions
     // ==========================================
-    private static async Task RunBatchingTest(MatchingEngine.MatchingEngineClient client, OrderRequest[] orders)
+    private static async Task RunBatchingTest(MatchingEngine.MatchingEngineClient client, OrderRequest[] orders,
+        int batchSize = 5_000)
     {
-        const int BatchSize = 5000;
         const int repeat = 5;
 
-        Console.WriteLine($"\n🚀 [BENCHMARK] Starting Batching (Size: {BatchSize}, Streams: {Concurrency})...");
+        Console.WriteLine($"\n🚀 [BENCHMARK] Starting Batching (Size: {batchSize}, Streams: {Concurrency})...");
 
         // Pre-compute all batches to keep allocation out of the benchmark hot loop
-        var batches = orders.Chunk(BatchSize).Select(chunk => new OrderBatchRequest
+        var batches = orders.Chunk(batchSize).Select(chunk => new OrderBatchRequest
         {
             Orders = { chunk }
         }).ToArray();
-        
-        
+
+
         int chunkSize = batches.Length / Concurrency;
-       
+
         for (int k = 0; k < repeat; k++)
         {
             var latencies = new ConcurrentBag<double>();
             int totalProcessed = 0;
 
             // Partition batches across concurrent tasks
-            
+
             var tasks = new List<Task>();
 
             var sw = Stopwatch.StartNew();
 
-            
+
             for (int i = 0; i < Concurrency; i++)
             {
                 int taskIndex = i;

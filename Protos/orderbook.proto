@@ -14,6 +14,12 @@ enum OrderType {
   MARKET = 2;
 }
 
+// ---  Cancel Reject Reason ---
+enum CancelRejectReason {
+  REASON_UNSPECIFIED = 0;
+  ORDER_NOT_FOUND = 1;
+}
+
 // --- Request Models ---
 message OrderRequest {
   uint64 id = 1;
@@ -24,9 +30,21 @@ message OrderRequest {
   int64 timestamp = 6;
 }
 
+message CancelRequest {
+  uint64 id = 1;
+}
+
+// --- Single Request ---
+message EngineCommand {
+  oneof command {
+    OrderRequest place_order = 1;
+    CancelRequest cancel_order = 2;
+  }
+}
+
 //  Batch Request 
-message OrderBatchRequest {
-  repeated OrderRequest orders = 1;
+message EngineBatchCommand {
+  repeated EngineCommand commands = 1;
 }
 
 // --- Event Models ---
@@ -34,6 +52,7 @@ message OrderPlaced { uint64 id = 1; uint64 price = 2; uint64 qty = 3; Side side
 message TradeExecuted { uint64 maker_id = 1; uint64 taker_id = 2; uint64 price = 3; uint64 qty = 4; int64 timestamp = 5; }
 message OrderCancelled { uint64 id = 1; uint64 cancelled_qty = 2; }
 message OrderKilled { uint64 id = 1; uint64 killed_qty = 2; }
+message CancelRejected { uint64 id = 1; CancelRejectReason reason = 2; }
 
 message MatchEvent {
   oneof event_data {
@@ -41,6 +60,7 @@ message MatchEvent {
     TradeExecuted filled = 2;
     OrderCancelled cancelled = 3;
     OrderKilled killed = 4;
+    CancelRejected rejected = 5;
   }
 }
 
@@ -60,8 +80,6 @@ message OrderBatchResponse {
 
 // --- Service Definition ---
 service MatchingEngine {
-
-  rpc PlaceOrder (OrderRequest) returns (OrderResponse);
-  rpc PlaceOrderStream (stream OrderRequest) returns (stream OrderResponse);
-  rpc PlaceBatchStream (stream OrderBatchRequest) returns (stream OrderBatchResponse);
+  rpc PlaceOrderStream (stream EngineCommand) returns (stream OrderResponse);
+  rpc PlaceBatchStream (stream EngineBatchCommand) returns (stream OrderBatchResponse);
 }
