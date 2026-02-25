@@ -10,12 +10,10 @@ use tokio_stream::wrappers::ReceiverStream;
 // Ref to Generated Code
 use crate::orderbook_grpc::match_event::EventData;
 use crate::orderbook_grpc::matching_engine_server::MatchingEngine;
-use crate::orderbook_grpc::{
-    self, OrderBatchRequest, OrderBatchResponse, OrderRequest, OrderResponse,
-};
+use crate::orderbook_grpc::{self, EngineBatchCommand, EngineCommand, OrderBatchResponse, OrderRequest, OrderResponse};
 
 // Internal Models
-use crate::models::events::{MatchEvent as InternalEvent, MatchEvent};
+use crate::models::events::{CancelRejectReason, MatchEvent as InternalEvent, MatchEvent};
 use crate::models::order::{Order, OrderType, Side};
 
 pub struct MatchingEngineService {
@@ -88,7 +86,6 @@ fn run_matching_actor(mut rx: mpsc::Receiver<OrderCommand>) {
 
 impl MatchingEngineService {
     pub fn new() -> Self {
-
         // Architecture Note:
         // We intentionally use a very small bounded channel (e.g., buffer = 4 or 16) for the Actor mailbox.
         // During stress testing (7M+ TPS), a large buffer (e.g., 1024) caused severe bufferbloat
@@ -102,7 +99,13 @@ impl MatchingEngineService {
         Self { sender: tx }
     }
 
-    fn parse_proto_order(req: OrderRequest) -> Result<Order, Status> {
+    fn parse_proto_order(req: EngineCommand) -> Result<Order, Status> {
+
+        let testing =  match req.command  {
+
+            
+
+        };
         let side = match req.side {
             1 => Side::Bid,
             2 => Side::Ask,
@@ -126,7 +129,7 @@ impl MatchingEngineService {
             qty: req.qty,
             side,
             order_type,
-            timestamp
+            timestamp,
         })
     }
 
@@ -167,6 +170,15 @@ impl MatchingEngineService {
                 InternalEvent::OrderKilled { id, killed_qty } => {
                     EventData::Killed(orderbook_grpc::OrderKilled { id, killed_qty })
                 }
+
+                InternalEvent::CancelRejected { id, reason } => {
+                    EventData::Rejected(orderbook_grpc::CancelRejected {
+                        id,
+                        reason: match reason {
+                            CancelRejectReason::OrderNotFound => 1,
+                        },
+                    })
+                }
             };
             result.push(orderbook_grpc::MatchEvent {
                 event_data: Some(event_data),
@@ -178,9 +190,11 @@ impl MatchingEngineService {
 
     async fn process_single_order(
         sender: mpsc::Sender<OrderCommand>,
-        req: OrderRequest,
+        req: EngineCommand,
     ) -> Result<OrderResponse, Status> {
         let order = Self::parse_proto_order(req)?;
+
+        let order_id = order.id;
 
         let (resp_tx, resp_rx) = oneshot::channel();
         let cmd = OrderCommand::PlaceOrder {
@@ -191,7 +205,9 @@ impl MatchingEngineService {
         if sender.send(cmd).await.is_err() {
             return Err(Status::internal("Engine offline"));
         }
-        let internal_events = resp_rx.await.map_err(|_| Status::internal("Actor offline"))?;
+        let internal_events = resp_rx
+            .await
+            .map_err(|_| Status::internal("Actor offline"))?;
 
         let proto_events = Self::parse_to_grpc_events(internal_events);
 
@@ -199,29 +215,19 @@ impl MatchingEngineService {
             success: true,
             message: "".to_string(),
             events: proto_events,
-            request_id: req.id,
+            request_id: order_id,
         })
     }
 }
 
 #[tonic::async_trait]
 impl MatchingEngine for MatchingEngineService {
-    // 1. Single Request (Retained for compatibility)
-    async fn place_order(
-        &self,
-        request: Request<OrderRequest>,
-    ) -> Result<Response<OrderResponse>, Status> {
-        let resp = Self::process_single_order(self.sender.clone(), request.into_inner()).await?;
-
-        Ok(Response::new(resp))
-    }
-
     // 2. Bidirectional Streaming (Streaming Implementation)
     type PlaceOrderStreamStream = Pin<Box<dyn Stream<Item = Result<OrderResponse, Status>> + Send>>;
 
     async fn place_order_stream(
         &self,
-        request: Request<Streaming<OrderRequest>>,
+        request: Request<Streaming<EngineCommand>>,
     ) -> Result<Response<Self::PlaceOrderStreamStream>, Status> {
         println!("Streaming connection established...");
         let mut in_stream = request.into_inner();
@@ -244,11 +250,12 @@ impl MatchingEngine for MatchingEngineService {
             Box::pin(ReceiverStream::new(rx)) as Self::PlaceOrderStreamStream
         ))
     }
-    type PlaceBatchStreamStream = Pin<Box<dyn Stream<Item = Result<OrderBatchResponse, Status>> + Send>>;
+    type PlaceBatchStreamStream =
+        Pin<Box<dyn Stream<Item = Result<OrderBatchResponse, Status>> + Send>>;
 
     async fn place_batch_stream(
         &self,
-        request: Request<Streaming<OrderBatchRequest>>,
+        request: Request<Streaming<EngineBatchCommand>>,
     ) -> Result<Response<Self::PlaceBatchStreamStream>, Status> {
         println!("[ASYNC PIPELINE] Batch streaming connection established.");
 
@@ -306,4 +313,3 @@ impl MatchingEngine for MatchingEngineService {
         ))
     }
 }
-
