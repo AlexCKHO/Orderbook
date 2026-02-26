@@ -1,7 +1,8 @@
 use crate::models::events::{CancelRejectReason, MatchEvent};
 use crate::models::order::{Order, OrderEntry, OrderType, Side};
 use std::collections::{BTreeMap, HashMap, VecDeque};
-use crate::models::events::MatchEvent::CancelRejected;
+use crate::models::events::CancelRejectReason::OrderNotFound;
+use crate::models::events::MatchEvent::{CancelRejected, OrderCancelled};
 
 // Note: Orderbook on Tokio Integrating Sync Logic with Async Runtime
 pub struct OrderBook {
@@ -36,6 +37,51 @@ impl OrderBook {
         }
 
         return events;
+    }
+
+    pub fn cancel_order(&mut self, order_id: u64, events: &mut Vec<MatchEvent>) {
+        if let Some(order) = self.order_locations.get(&order_id) {
+            let price: u64 = order.0;
+            let side: Side = order.1;
+
+            if side == Side::Ask {
+             if !self.asks[&price].is_empty() {
+                  if let Some(queue) = self.asks.get_mut(&price){
+                    if let Some(position) =  queue.iter().position(|_order| _order.id == order_id) {
+                       let qty =  queue[position].qty;
+                        queue.remove(position);
+
+                        events.push(OrderCancelled {
+                            id: order_id,
+                            cancelled_qty: qty
+                        })
+                    }else {
+                        events.push(CancelRejected {
+                            id: order_id,
+                            reason: OrderNotFound
+                        })
+
+                    }
+
+                  } else {
+                      events.push(CancelRejected {
+                          id: order_id,
+                          reason: OrderNotFound
+                      })
+
+                  }
+             }
+
+            } else if side == Side::Bid {
+                if !self.bids[&price].is_empty() {
+                    self.bids[&price].remove(order_id as usize);
+                }
+
+
+            }
+        } else {
+            events.push(CancelRejected {id: order_id, reason: CancelRejectReason::OrderNotFound})
+        }
     }
 
     // When people are buying
@@ -167,14 +213,7 @@ impl OrderBook {
             .push_back(new_ask_order); // 3. Add the order to the end of the queue (FIFO)
     }
 
-    pub fn cancel_order(&mut self, order_id: u64, events: &mut Vec<MatchEvent>) {
-        if let Some(order) = self.order_locations.get(&order_id) {
-            let price: u64 = order.0;
-            let side: Side = order.1;
-        } else {
-            events.push(CancelRejected {id: order_id, reason: CancelRejectReason::OrderNotFound})
-        }
-    }
+
 }
 #[cfg(test)]
 mod tests {

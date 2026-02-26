@@ -10,6 +10,8 @@ pub enum OrderType {
     Market,
 }
 
+
+
 #[derive(Debug, Clone)]
 pub struct Order {
     pub id: u64,
@@ -48,4 +50,9 @@ impl OrderEntry {
             qty: order.qty,
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct CancelEntry {
+    pub id: u64,
 }

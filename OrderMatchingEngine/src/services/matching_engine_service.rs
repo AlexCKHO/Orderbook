@@ -21,20 +21,16 @@ pub struct MatchingEngineService {
 }
 
 enum OrderCommand {
-    // Retain original single order (for non-streaming APIs)
-    PlaceOrder {
-        order: Order,
-        resp: oneshot::Sender<Vec<InternalEvent>>,
-    },
+
     // Retain original batch order (for legacy code reference)
     PlaceOrderBatch {
-        orders: Vec<Order>,
+        commands: Vec<Order>,
         resp: oneshot::Sender<u64>,
     },
 
     // Dedicated lock-free command for high-frequency streaming
     PlaceOrderBatchStream {
-        orders: Vec<Order>,
+        commands: Vec<Order>,
         // Passes the gRPC responder directly to the actor
         responder: mpsc::Sender<Result<OrderBatchResponse, Status>>,
     },
@@ -46,24 +42,20 @@ fn run_matching_actor(mut rx: mpsc::Receiver<OrderCommand>) {
 
         while let Some(cmd) = rx.recv().await {
             match cmd {
-                OrderCommand::PlaceOrder { order, resp } => {
-                    let events = order_book.add_order(order);
-                    let _ = resp.send(events);
-                }
-                OrderCommand::PlaceOrderBatch { orders, resp } => {
-                    let count = orders.len();
-                    for order in orders {
+                OrderCommand::PlaceOrderBatch { commands, resp } => {
+                    let count = commands.len();
+                    for order in commands {
                         order_book.add_order(order);
                     }
                     let _ = resp.send(count as u64);
                 }
 
                 // Asynchronous pipeline processing
-                OrderCommand::PlaceOrderBatchStream { orders, responder } => {
-                    let count = orders.len();
+                OrderCommand::PlaceOrderBatchStream { commands, responder } => {
+                    let count = commands.len();
 
                     // 1. Synchronous matching (CPU bound, avoids context switching)
-                    for order in orders {
+                    for order in commands {
                         order_book.add_order(order);
                     }
 
@@ -103,7 +95,7 @@ impl MatchingEngineService {
 
         let testing =  match req.command  {
 
-            
+
 
         };
         let side = match req.side {
@@ -270,19 +262,19 @@ impl MatchingEngine for MatchingEngineService {
         tokio::spawn(async move {
             // Receiver task: Dedicated to handling Network I/O
             while let Ok(Some(batch_req)) = in_stream.message().await {
-                let mut orders = Vec::with_capacity(batch_req.orders.len());
+                let mut commands = Vec::with_capacity(batch_req.commands.len());
 
-                for req in batch_req.orders {
-                    if let Ok(order) = Self::parse_proto_order(req) {
-                        orders.push(order);
+                for req in batch_req.commands {
+                    if let Ok(command) = Self::parse_proto_order(req) {
+                        commands.push(command);
                     }
                 }
 
-                let batch_size = orders.len();
+                let batch_size = commands.len();
                 if batch_size > 0 {
                     // Construct new command, bundling the response channel 'tx'
                     let cmd = OrderCommand::PlaceOrderBatchStream {
-                        orders,
+                        commands,
                         responder: tx.clone(),
                     };
 
