@@ -34,7 +34,7 @@ impl OrderBook {
             self.match_new_ask(order, &mut events);
         }
 
-        return events;
+         events
     }
 
     pub fn cancel_order(&mut self, order_id: u64, events: &mut Vec<MatchEvent>) {
