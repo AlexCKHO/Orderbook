@@ -1,10 +1,8 @@
 use crate::models::events::{CancelRejectReason, MatchEvent};
-use crate::models::order::{Order, OrderEntry, OrderType, Side};
+use crate::models::order::{Order, OrderType, Side};
 use std::collections::{BTreeMap, HashMap, VecDeque};
-use crate::models::events::CancelRejectReason::OrderNotFound;
-use crate::models::events::MatchEvent::{CancelRejected, OrderCancelled};
 
-// Note: Orderbook on Tokio Integrating Sync Logic with Async Runtime
+// Note: Order book on Tokio Integrating Sync Logic with Async Runtime
 pub struct OrderBook {
     // FIFO;
     pub asks: BTreeMap<u64, VecDeque<Order>>,
@@ -40,48 +38,38 @@ impl OrderBook {
     }
 
     pub fn cancel_order(&mut self, order_id: u64, events: &mut Vec<MatchEvent>) {
-        if let Some(order) = self.order_locations.get(&order_id) {
-            let price: u64 = order.0;
-            let side: Side = order.1;
-
-            if side == Side::Ask {
-             if !self.asks[&price].is_empty() {
-                  if let Some(queue) = self.asks.get_mut(&price){
-                    if let Some(position) =  queue.iter().position(|_order| _order.id == order_id) {
-                       let qty =  queue[position].qty;
-                        queue.remove(position);
-
-                        events.push(OrderCancelled {
-                            id: order_id,
-                            cancelled_qty: qty
-                        })
-                    }else {
-                        events.push(CancelRejected {
-                            id: order_id,
-                            reason: OrderNotFound
-                        })
-
-                    }
-
-                  } else {
-                      events.push(CancelRejected {
-                          id: order_id,
-                          reason: OrderNotFound
-                      })
-
-                  }
-             }
-
-            } else if side == Side::Bid {
-                if !self.bids[&price].is_empty() {
-                    self.bids[&price].remove(order_id as usize);
-                }
-
-
+        let (price, side) = match self.order_locations.remove(&order_id) {
+            Some(loc) => loc,
+            None => {
+                events.push(MatchEvent::CancelRejected {
+                    id: order_id,
+                    reason: CancelRejectReason::OrderNotFound,
+                });
+                return;
             }
-        } else {
-            events.push(CancelRejected {id: order_id, reason: CancelRejectReason::OrderNotFound})
+        };
+
+        let book = match side {
+            Side::Bid => &mut self.bids,
+            Side::Ask => &mut self.asks,
+        };
+
+        if let Some(queue) = book.get_mut(&price) {
+            if let Some(position) = queue.iter().position(|o| o.id == order_id) {
+                let cancelled_order = queue.remove(position).unwrap();
+
+                events.push(MatchEvent::OrderCancelled {
+                    id: cancelled_order.qty,
+                    cancelled_qty: cancelled_order.qty,
+                });
+
+                if queue.is_empty() {
+                    book.remove(&price);
+                }
+            }
         }
+
+        return;
     }
 
     // When people are buying
@@ -121,7 +109,7 @@ impl OrderBook {
         }
 
         if new_bid_order.qty > 0 {
-            if (new_bid_order.order_type == OrderType::Limit) {
+            if new_bid_order.order_type == OrderType::Limit {
                 self.add_order_to_bids(new_bid_order, events);
             } else if new_bid_order.order_type == OrderType::Market {
                 events.push(MatchEvent::OrderKilled {
@@ -170,9 +158,9 @@ impl OrderBook {
         }
         // Adding the remaining order to the queue if it is a market order => kill
         if new_ask_order.qty > 0 {
-            if (new_ask_order.order_type == OrderType::Limit) {
+            if new_ask_order.order_type == OrderType::Limit {
                 self.add_order_to_asks(new_ask_order, events)
-            } else if (new_ask_order.order_type == OrderType::Market) {
+            } else if new_ask_order.order_type == OrderType::Market {
                 events.push(MatchEvent::OrderKilled {
                     id: new_ask_order.id,
                     killed_qty: new_ask_order.qty,
@@ -212,14 +200,10 @@ impl OrderBook {
             .or_insert_with(VecDeque::new) // 2. If not, create a new "queue" (VecDeque) for this price
             .push_back(new_ask_order); // 3. Add the order to the end of the queue (FIFO)
     }
-
-
 }
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::VecDeque;
-
     /// Helper function to construct Orders
     fn new_order(
         id: u64,
