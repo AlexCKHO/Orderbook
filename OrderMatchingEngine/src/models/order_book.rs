@@ -1,12 +1,12 @@
 use crate::models::events::{CancelRejectReason, MatchEvent};
-use crate::models::order::{Order, OrderType, Side};
+use crate::models::order::{EngineAction, OrderEntry, OrderType, Side};
 use std::collections::{BTreeMap, HashMap, VecDeque};
 
 // Note: Order book on Tokio Integrating Sync Logic with Async Runtime
 pub struct OrderBook {
     // FIFO;
-    pub asks: BTreeMap<u64, VecDeque<Order>>,
-    pub bids: BTreeMap<u64, VecDeque<Order>>,
+    pub asks: BTreeMap<u64, VecDeque<OrderEntry>>,
+    pub bids: BTreeMap<u64, VecDeque<OrderEntry>>,
     // Order.id, (Order.pice, Side)
     pub order_locations: HashMap<u64, (u64, Side)>,
 }
@@ -25,7 +25,7 @@ impl OrderBook {
         self.asks.clear();
         self.order_locations.clear();
     }
-    pub fn add_order(&mut self, order: Order) -> Vec<MatchEvent> {
+    pub fn add_order(&mut self, order: OrderEntry) -> Vec<MatchEvent> {
         let mut events = Vec::new();
 
         if order.side == Side::Bid {
@@ -37,7 +37,9 @@ impl OrderBook {
          events
     }
 
-    pub fn cancel_order(&mut self, order_id: u64, events: &mut Vec<MatchEvent>) {
+
+    pub fn cancel_order(&mut self, order_id: u64) -> Vec<MatchEvent>{
+        let mut events = Vec::new();
         let (price, side) = match self.order_locations.remove(&order_id) {
             Some(loc) => loc,
             None => {
@@ -45,7 +47,7 @@ impl OrderBook {
                     id: order_id,
                     reason: CancelRejectReason::OrderNotFound,
                 });
-                return;
+                return events;
             }
         };
 
@@ -69,11 +71,23 @@ impl OrderBook {
             }
         }
 
-        return;
+        events
+    }
+
+    pub fn process_batch(&mut self, commands: Vec<EngineAction>){
+
+        for command in commands {
+            match command {
+                EngineAction::Create(order) => {  self.add_order(order);}
+                EngineAction::Cancel(cancel) => {self.cancel_order(cancel.id);}
+            }
+
+        }
+
     }
 
     // When people are buying
-    fn match_new_bid(&mut self, mut new_bid_order: Order, events: &mut Vec<MatchEvent>) {
+    fn match_new_bid(&mut self, mut new_bid_order: OrderEntry, events: &mut Vec<MatchEvent>) {
         while new_bid_order.qty > 0 {
             if let Some((&ask_price, ask_queue)) = self.asks.iter_mut().next() {
                 if new_bid_order.order_type == OrderType::Limit && ask_price > new_bid_order.price {
@@ -120,7 +134,7 @@ impl OrderBook {
         }
     }
 
-    fn match_new_ask(&mut self, mut new_ask_order: Order, events: &mut Vec<MatchEvent>) {
+    fn match_new_ask(&mut self, mut new_ask_order: OrderEntry, events: &mut Vec<MatchEvent>) {
         while new_ask_order.qty > 0 {
             // next_back gets the larget bid_price
             if let Some((&bid_price, bid_queue)) = self.bids.iter_mut().next_back() {
@@ -169,7 +183,7 @@ impl OrderBook {
         }
     }
 
-    pub fn add_order_to_bids(&mut self, new_bid_order: Order, events: &mut Vec<MatchEvent>) {
+    pub fn add_order_to_bids(&mut self, new_bid_order: OrderEntry, events: &mut Vec<MatchEvent>) {
         self.order_locations
             .insert(new_bid_order.id, (new_bid_order.price, Side::Bid));
 
@@ -185,7 +199,7 @@ impl OrderBook {
             .push_back(new_bid_order); // 3. Append the order to the end to maintain time priority (FIFO)
     }
 
-    pub fn add_order_to_asks(&mut self, new_ask_order: Order, events: &mut Vec<MatchEvent>) {
+    pub fn add_order_to_asks(&mut self, new_ask_order: OrderEntry, events: &mut Vec<MatchEvent>) {
         self.order_locations
             .insert(new_ask_order.id, (new_ask_order.price, Side::Ask));
 
@@ -212,8 +226,8 @@ mod tests {
         side: Side,
         order_type: OrderType,
         timestamp: i64,
-    ) -> Order {
-        Order {
+    ) -> OrderEntry {
+        OrderEntry {
             id,
             price,
             qty,

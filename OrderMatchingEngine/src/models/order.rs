@@ -10,10 +10,14 @@ pub enum OrderType {
     Market,
 }
 
-
+#[derive(Debug, Clone)]
+pub enum EngineAction {
+    Create(OrderEntry),
+    Cancel(CancelEntry),
+}
 
 #[derive(Debug, Clone)]
-pub struct Order {
+pub struct OrderEntry {
     pub id: u64,
     pub price: u64,
     pub qty: u64,
@@ -32,24 +36,6 @@ pub struct Order {
     // 3. Debugging & Replay
     // During periods of high market volatility or extreme throughput, logs can become chaotic. Without precise timestamps, it is nearly impossible to reconstruct the exact sequence of events or determine which specific order triggered a trade.
     pub timestamp: i64
-}
-
-#[derive(Debug, Clone)]
-pub struct OrderEntry {
-    pub id: u64,
-    pub price: u64,
-    pub qty: u64,
-
-}
-
-impl OrderEntry {
-    pub fn new(order: &Order) -> Self {
-        Self {
-            id: order.id,
-            price: order.price,
-            qty: order.qty,
-        }
-    }
 }
 
 #[derive(Debug, Clone)]

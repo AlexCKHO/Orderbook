@@ -10,27 +10,31 @@ use tokio_stream::wrappers::ReceiverStream;
 // Ref to Generated Code
 use crate::orderbook_grpc::match_event::EventData;
 use crate::orderbook_grpc::matching_engine_server::MatchingEngine;
-use crate::orderbook_grpc::{self, EngineBatchCommand, EngineCommand, OrderBatchResponse, OrderRequest, OrderResponse};
+use crate::orderbook_grpc::{
+    self, CancelRequest, EngineBatchCommand, EngineCommand, OrderBatchResponse, OrderRequest,
+    OrderResponse,
+};
 
 // Internal Models
 use crate::models::events::{CancelRejectReason, MatchEvent as InternalEvent, MatchEvent};
-use crate::models::order::{Order, OrderType, Side};
+use crate::models::order::{CancelEntry, EngineAction, OrderEntry, OrderType, Side};
+use crate::orderbook_grpc::engine_command::Command;
+use crate::orderbook_grpc::engine_command::Command::CancelOrder;
 
 pub struct MatchingEngineService {
     sender: mpsc::Sender<OrderCommand>,
 }
 
 enum OrderCommand {
-
     // Retain original batch order (for legacy code reference)
     PlaceOrderBatch {
-        commands: Vec<Order>,
+        commands: Vec<EngineAction>,
         resp: oneshot::Sender<u64>,
     },
 
     // Dedicated lock-free command for high-frequency streaming
     PlaceOrderBatchStream {
-        commands: Vec<Order>,
+        commands: Vec<EngineAction>,
         // Passes the gRPC responder directly to the actor
         responder: mpsc::Sender<Result<OrderBatchResponse, Status>>,
     },
@@ -44,20 +48,19 @@ fn run_matching_actor(mut rx: mpsc::Receiver<OrderCommand>) {
             match cmd {
                 OrderCommand::PlaceOrderBatch { commands, resp } => {
                     let count = commands.len();
-                    for order in commands {
-                        order_book.add_order(order);
-                    }
+                    order_book.process_batch(commands);
                     let _ = resp.send(count as u64);
                 }
 
                 // Asynchronous pipeline processing
-                OrderCommand::PlaceOrderBatchStream { commands, responder } => {
+                OrderCommand::PlaceOrderBatchStream {
+                    commands,
+                    responder,
+                } => {
                     let count = commands.len();
 
                     // 1. Synchronous matching (CPU bound, avoids context switching)
-                    for order in commands {
-                        order_book.add_order(order);
-                    }
+                    order_book.process_batch(commands);
 
                     // 2. Prepare response
                     let resp = OrderBatchResponse {
@@ -91,13 +94,7 @@ impl MatchingEngineService {
         Self { sender: tx }
     }
 
-    fn parse_proto_order(req: EngineCommand) -> Result<Order, Status> {
-
-        let testing =  match req.command  {
-
-
-
-        };
+    fn parse_proto_order(req: OrderRequest) -> Result<OrderEntry, Status> {
         let side = match req.side {
             1 => Side::Bid,
             2 => Side::Ask,
@@ -115,7 +112,7 @@ impl MatchingEngineService {
             .unwrap()
             .as_nanos() as i64;
 
-        Ok(Order {
+        Ok(OrderEntry {
             id: req.id,
             price: req.price,
             qty: req.qty,
@@ -123,6 +120,9 @@ impl MatchingEngineService {
             order_type,
             timestamp,
         })
+    }
+    fn parse_proto_cancel_request(req: CancelRequest) -> Result<CancelEntry, Status> {
+        Ok(CancelEntry { id: req.id })
     }
 
     fn parse_to_grpc_events(events: Vec<MatchEvent>) -> Vec<orderbook_grpc::MatchEvent> {
@@ -184,6 +184,10 @@ impl MatchingEngineService {
         sender: mpsc::Sender<OrderCommand>,
         req: EngineCommand,
     ) -> Result<OrderResponse, Status> {
+        let request = match req.command.unwrap() {
+            Command::PlaceOrder(_) => {}
+            Command::CancelOrder(_) => {}
+        };
         let order = Self::parse_proto_order(req)?;
 
         let order_id = order.id;
