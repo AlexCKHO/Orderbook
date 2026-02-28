@@ -34,11 +34,10 @@ impl OrderBook {
             self.match_new_ask(order, &mut events);
         }
 
-         events
+        events
     }
 
-
-    pub fn cancel_order(&mut self, order_id: u64) -> Vec<MatchEvent>{
+    pub fn cancel_order(&mut self, order_id: u64) -> Vec<MatchEvent> {
         let mut events = Vec::new();
         let (price, side) = match self.order_locations.remove(&order_id) {
             Some(loc) => loc,
@@ -74,16 +73,21 @@ impl OrderBook {
         events
     }
 
-    pub fn process_batch(&mut self, commands: Vec<EngineAction>){
-
+    pub fn process_batch(&mut self, commands: Vec<EngineAction>) {
         for command in commands {
-            match command {
-                EngineAction::Create(order) => {  self.add_order(order);}
-                EngineAction::Cancel(cancel) => {self.cancel_order(cancel.id);}
-            }
-
+            self.process_single(command)
         }
+    }
 
+    pub fn process_single(&mut self, command: EngineAction) {
+        match command {
+            EngineAction::Create(order) => {
+                self.add_order(order);
+            }
+            EngineAction::Cancel(cancel) => {
+                self.cancel_order(cancel.id);
+            }
+        }
     }
 
     // When people are buying
