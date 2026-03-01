@@ -60,7 +60,7 @@ impl OrderBook {
                 let cancelled_order = queue.remove(position).unwrap();
 
                 events.push(MatchEvent::OrderCancelled {
-                    id: cancelled_order.qty,
+                    id: cancelled_order.id,
                     cancelled_qty: cancelled_order.qty,
                 });
 
@@ -75,18 +75,14 @@ impl OrderBook {
 
     pub fn process_batch(&mut self, commands: Vec<EngineAction>) {
         for command in commands {
-            self.process_single(command)
+            self.process_single(command);
         }
     }
 
-    pub fn process_single(&mut self, command: EngineAction) {
+    pub fn process_single(&mut self, command: EngineAction) -> Vec<MatchEvent> {
         match command {
-            EngineAction::Create(order) => {
-                self.add_order(order);
-            }
-            EngineAction::Cancel(cancel) => {
-                self.cancel_order(cancel.id);
-            }
+            EngineAction::Create(order) => self.add_order(order),
+            EngineAction::Cancel(cancel) => self.cancel_order(cancel.id),
         }
     }
 

@@ -20,18 +20,21 @@ use crate::models::events::{CancelRejectReason, MatchEvent as InternalEvent, Mat
 use crate::models::order::{CancelEntry, EngineAction, OrderEntry, OrderType, Side};
 use crate::orderbook_grpc::engine_command::Command;
 
-
 pub struct MatchingEngineService {
     sender: mpsc::Sender<OrderCommand>,
 }
 
 enum OrderCommand {
+    PlaceOrder {
+        commands: EngineAction,
+        resp: oneshot::Sender<Vec<InternalEvent>>,
+    },
 
     // Retain original batch order (for legacy code reference)
-    PlaceOrderBatch {
-        commands: Vec<EngineAction>,
-        resp: oneshot::Sender<u64>,
-    },
+    // PlaceOrderBatch {
+    //     commands: Vec<EngineAction>,
+    //     resp: oneshot::Sender<u64>,
+    // },
 
     // Dedicated lock-free command for high-frequency streaming
     PlaceOrderBatchStream {
@@ -46,14 +49,17 @@ fn run_matching_actor(mut rx: mpsc::Receiver<OrderCommand>) {
 
         while let Some(cmd) = rx.recv().await {
             match cmd {
-
                 //todo make use of events
-           
-                OrderCommand::PlaceOrderBatch { commands, resp } => {
-                    let count = commands.len();
-                    order_book.process_batch(commands);
-                    let _ = resp.send(count as u64);
+                OrderCommand::PlaceOrder { commands, resp } => {
+                    let events = order_book.process_single(commands);
+                    let _ = resp.send(events);
                 }
+
+                // OrderCommand::PlaceOrderBatch { commands, resp } => {
+                //     let count = commands.len();
+                //     order_book.process_batch(commands);
+                //     let _ = resp.send(count as u64);
+                // }
 
                 // Asynchronous pipeline processing
                 OrderCommand::PlaceOrderBatchStream {
@@ -157,7 +163,7 @@ impl MatchingEngineService {
                     taker_id,
                     price,
                     qty,
-                    timestamp: timestamp as i64,
+                    timestamp,
                 }),
                 InternalEvent::OrderCancelled { id, cancelled_qty } => {
                     EventData::Cancelled(orderbook_grpc::OrderCancelled { id, cancelled_qty })
@@ -180,24 +186,32 @@ impl MatchingEngineService {
             });
         }
 
-        return result;
+        result
     }
 
     async fn process_single_order(
         sender: mpsc::Sender<OrderCommand>,
         req: EngineCommand,
     ) -> Result<OrderResponse, Status> {
-        let request = match req.command.unwrap() {
-            Command::PlaceOrder(orderEntry) => Self::parse_proto_order(orderEntry),
-            Command::CancelOrder(cancelEntry) => Self::parse_proto_cancel_request(cancelEntry),
+        let (engine_action, request_id) = match req.command.unwrap() {
+            Command::PlaceOrder(order_entry) => {
+                let id = order_entry.id;
+                let action = Self::parse_proto_order(order_entry)
+                    .map_err(|_| Status::invalid_argument("Failed to map Order"))?;
+                (action, id)
+            }
+            Command::CancelOrder(cancel_entry) => {
+                let id = cancel_entry.id.clone();
+                let action = Self::parse_proto_cancel_request(cancel_entry)
+                    .map_err(|_| Status::invalid_argument("Failed to map Cancel"))?;
+                (action, id)
+            }
         };
-        let order = Self::parse_proto_order(req)?;
-
-        let order_id = order.id;
 
         let (resp_tx, resp_rx) = oneshot::channel();
-        let cmd = OrderCommand::PlaceOrderBatch {
-            commands: req.command
+
+        let cmd = OrderCommand::PlaceOrder {
+            commands: engine_action,
             resp: resp_tx,
         };
 
@@ -212,9 +226,9 @@ impl MatchingEngineService {
 
         Ok(OrderResponse {
             success: true,
-            message: "".to_string(),
+            message: "Order processed successfully".to_string(),
             events: proto_events,
-            request_id: order_id,
+            request_id,
         })
     }
 }
@@ -222,7 +236,7 @@ impl MatchingEngineService {
 #[tonic::async_trait]
 impl MatchingEngine for MatchingEngineService {
     // 2. Bidirectional Streaming (Streaming Implementation)
-    type PlaceOrderStreamStream = Pin<Box<dyn Stream<Item=Result<OrderResponse, Status>> + Send>>;
+    type PlaceOrderStreamStream = Pin<Box<dyn Stream<Item = Result<OrderResponse, Status>> + Send>>;
 
     async fn place_order_stream(
         &self,
@@ -250,7 +264,7 @@ impl MatchingEngine for MatchingEngineService {
         ))
     }
     type PlaceBatchStreamStream =
-    Pin<Box<dyn Stream<Item=Result<OrderBatchResponse, Status>> + Send>>;
+        Pin<Box<dyn Stream<Item = Result<OrderBatchResponse, Status>> + Send>>;
 
     async fn place_batch_stream(
         &self,
@@ -269,13 +283,13 @@ impl MatchingEngine for MatchingEngineService {
         tokio::spawn(async move {
             // Receiver task: Dedicated to handling Network I/O
             while let Ok(Some(batch_req)) = in_stream.message().await {
-                let mut commands = Vec::with_capacity(batch_req.commands.len());
+                let commands = Vec::with_capacity(batch_req.commands.len());
 
-                for req in batch_req.commands {
-                    if let Ok(command) = Self::parse_proto_order(req) {
-                        commands.push(command);
-                    }
-                }
+                // for req in batch_req.commands {
+                //     if let Ok(command) = Self::parse_proto_order(req) {
+                //         commands.push(command);
+                //     }
+                // }
 
                 let batch_size = commands.len();
                 if batch_size > 0 {
