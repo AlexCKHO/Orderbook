@@ -59,16 +59,15 @@ class Program
             Console.WriteLine($"\n🕵️‍♂️ 啟動自動尋找最佳 Batch Size (Sweet Spot) 測試...");
             Console.WriteLine($"| Batch Size | TPS (Orders/sec) | Latency p50 (ms) | Latency p99 (ms) |");
             Console.WriteLine($"|------------|------------------|------------------|------------------|");
-            
-            
+
+
             foreach (var size in testBatchSizes)
             {
                 // 1. 執行 GC 清理
                 GC.Collect();
-    
+
                 // 2. 執行你寫好嘅 Batching 測試 (但今次傳入變數 size)
                 await RunBatchingTest(client, requests, size);
-
             }
         }
     }
@@ -77,7 +76,7 @@ class Program
     // MODE 1: HFT STREAMING
     // Tracks latency by matching RequestId in response
     // ==========================================
-    private static async Task RunStreamingTest(MatchingEngine.MatchingEngineClient client, OrderRequest[] orders)
+    private static async Task RunStreamingTest(MatchingEngine.MatchingEngineClient client, EngineCommand[] orders)
     {
         // Scale concurrency based on logical cores (typically 4-8 yields the best throughput)
 
@@ -122,9 +121,10 @@ class Program
                 // Hot path: Sender loop
                 foreach (var req in chunk)
                 {
-                    if (req.Id % 1000 == 0)
+
+                    if (req.PlaceOrder.Id % 1000 == 0)
                     {
-                        sentTimestamps[req.Id] = Stopwatch.GetTimestamp();
+                        sentTimestamps[req.PlaceOrder.Id] = Stopwatch.GetTimestamp();
                     }
 
                     await call.RequestStream.WriteAsync(req);
@@ -146,7 +146,7 @@ class Program
     // MODE 2: BATCHING
     // Tracks latency using strict FIFO assumptions
     // ==========================================
-    private static async Task RunBatchingTest(MatchingEngine.MatchingEngineClient client, OrderRequest[] orders,
+    private static async Task RunBatchingTest(MatchingEngine.MatchingEngineClient client, EngineCommand[] orders,
         int batchSize = 5_000)
     {
         const int repeat = 5;
@@ -154,9 +154,9 @@ class Program
         Console.WriteLine($"\n🚀 [BENCHMARK] Starting Batching (Size: {batchSize}, Streams: {Concurrency})...");
 
         // Pre-compute all batches to keep allocation out of the benchmark hot loop
-        var batches = orders.Chunk(batchSize).Select(chunk => new OrderBatchRequest
+        var batches = orders.Chunk(batchSize).Select(chunk => new EngineBatchCommand()
         {
-            Orders = { chunk }
+            Commands = { chunk }
         }).ToArray();
 
 
@@ -225,16 +225,19 @@ class Program
         }
     }
 
-    private static OrderRequest GenerateRandomOrder(int index)
+    private static EngineCommand GenerateRandomOrder(int index)
     {
-        return new OrderRequest
+        return new EngineCommand
         {
-            Id = (ulong)(1000000 + index),
-            Price = (ulong)Random.Shared.Next(100, 201),
-            Qty = (ulong)Random.Shared.Next(1, 100),
-            Side = Random.Shared.Next(0, 2) == 0 ? Side.Bid : Side.Ask,
-            OrderType = OrderType.Limit,
-            Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            PlaceOrder = new OrderRequest
+            {
+                Id = (ulong)(1000000 + index),
+                Price = (ulong)Random.Shared.Next(100, 201),
+                Qty = (ulong)Random.Shared.Next(1, 100),
+                Side = Random.Shared.Next(0, 2) == 0 ? Side.Bid : Side.Ask,
+                OrderType = OrderType.Limit,
+                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            }
         };
     }
 
