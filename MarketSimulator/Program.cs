@@ -36,7 +36,26 @@ class Program
         Console.WriteLine($"⚡ [SETUP] Pre-generating {TotalOrders:N0} orders in RAM...");
 
         // Pre-allocate objects to isolate GC overhead from our benchmark measurements
-        var requests = Enumerable.Range(0, TotalOrders).Select(i => GenerateRandomOrder(i)).ToArray();
+
+        // var orderRequest = Enumerable.Range(0, TotalOrders).Select(i => GenerateRandomOrderRequest(i)).ToArray();
+
+        // var cancelRequest = Enumerable.Range(0, TotalOrders).Select(i => GenerateRandomCancelRequest(i)).ToArray();
+
+        var listOfEngineCommands = new List<EngineCommand>((int)(TotalOrders * 1.2));
+
+        for (var i = 0; i < TotalOrders; i++)
+        {
+            var addCancel = Random.Shared.Next(7) == 0;
+            listOfEngineCommands.Add(GenerateRandomOrderRequest(i));
+
+            if (addCancel)
+            {
+                listOfEngineCommands.Add(GenerateRandomCancelRequest(i));
+            }
+        }
+
+        var engineCommands = listOfEngineCommands.ToArray();
+
 
         Console.WriteLine("\n💀 Select benchmark mode:");
         Console.WriteLine("1. HFT Streaming (Precision tracking via Request ID)");
@@ -50,7 +69,7 @@ class Program
 
         if (choice == "1")
         {
-            await RunStreamingTest(client, requests);
+            await RunStreamingTest(client, engineCommands);
         }
         else
         {
@@ -63,11 +82,10 @@ class Program
 
             foreach (var size in testBatchSizes)
             {
-                // 1. 執行 GC 清理
                 GC.Collect();
 
-                // 2. 執行你寫好嘅 Batching 測試 (但今次傳入變數 size)
-                await RunBatchingTest(client, requests, size);
+
+                await RunBatchingTest(client, engineCommands, size);
             }
         }
     }
@@ -121,10 +139,20 @@ class Program
                 // Hot path: Sender loop
                 foreach (var req in chunk)
                 {
+                    ulong reqId = 0;
+
+                    if (req.CommandCase == EngineCommand.CommandOneofCase.PlaceOrder)
+                    {
+                        reqId = req.PlaceOrder.Id;
+                    }
+                    else if (req.CommandCase == EngineCommand.CommandOneofCase.CancelOrder)
+                    {
+                        reqId = req.CancelOrder.Id;
+                    }
 
                     if (req.PlaceOrder.Id % 1000 == 0)
                     {
-                        sentTimestamps[req.PlaceOrder.Id] = Stopwatch.GetTimestamp();
+                        sentTimestamps[reqId] = Stopwatch.GetTimestamp();
                     }
 
                     await call.RequestStream.WriteAsync(req);
@@ -225,7 +253,7 @@ class Program
         }
     }
 
-    private static EngineCommand GenerateRandomOrder(int index)
+    private static EngineCommand GenerateRandomOrderRequest(int index)
     {
         return new EngineCommand
         {
@@ -237,6 +265,17 @@ class Program
                 Side = Random.Shared.Next(0, 2) == 0 ? Side.Bid : Side.Ask,
                 OrderType = OrderType.Limit,
                 Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            }
+        };
+    }
+
+    private static EngineCommand GenerateRandomCancelRequest(int index)
+    {
+        return new EngineCommand
+        {
+            CancelOrder = new CancelRequest()
+            {
+                Id = (ulong)(1000000 + index)
             }
         };
     }

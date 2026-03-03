@@ -15,6 +15,7 @@ tokio = { version = "1.0", features = ["macros", "rt-multi-thread"] } # Async Ru
 tokio-stream = { version = "0.1", features = ["net"] }
 futures = "0.3"
 oneshot = "0.1.13"          # Async tool
+flume = "0.12.0"
 
 [build-dependencies]     # Complie tool
 tonic-build = "0.12"     # transform .proto file to Rust Code
