@@ -9,8 +9,9 @@ public class BinanceDataParser
     private readonly Dictionary<ulong, ulong> _activeBids = new();
     private readonly Dictionary<ulong, ulong> _activeAsks = new();
     private ulong _currentOrderId = 1_000_000;
+    
+    public int CorruptedLinesCount { get; private set; } = 0;
 
-    // 🌟 Note: Parameter changed to IEnumerable<string> and return type to IEnumerable<EngineCommand> for lazy evaluation
     public IEnumerable<EngineCommand> ParseLines(IEnumerable<string> jsonLines)
     {
         foreach (var line in jsonLines)
@@ -23,13 +24,26 @@ public class BinanceDataParser
             string actualJson = line.Substring(dataIndex + 7);
             actualJson = actualJson.Substring(0, actualJson.Length - 1);
 
-            var msg = JsonSerializer.Deserialize<BinanceMessage>(actualJson);
+            BinanceMessage msg = null;
+
+            // 🛡️ 加入 try-catch 攔截 64KB 截斷 / 格式錯誤嘅 JSON
+            try
+            {
+                msg = JsonSerializer.Deserialize<BinanceMessage>(actualJson);
+            }
+            catch (JsonException)
+            {
+                // 遇到爛 JSON，記錄數量，然後直接 skip 呢一行，繼續處理下一行
+                CorruptedLinesCount++;
+                continue; 
+            }
+
+            if (msg == null) continue;
 
             if (msg.Stream.Contains("depth"))
             {
                 var depth = msg.Data.Deserialize<DepthData>();
                 
-                // Emits commands sequentially via yield return as they are generated
                 foreach (var cmd in ProcessOrderBookLevels(depth.Bids, Side.Bid, _activeBids))
                     yield return cmd;
 
@@ -58,10 +72,9 @@ public class BinanceDataParser
             }
         }
     }
-
-    // Refactored to use yield return for lazy execution
     private IEnumerable<EngineCommand> ProcessOrderBookLevels(string[][] levels, Side side, Dictionary<ulong, ulong> activeDict)
     {
+        // ... (Keep the previous yield return implementation here)
         if (levels == null) yield break;
 
         foreach (var level in levels)

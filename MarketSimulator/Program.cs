@@ -2,6 +2,7 @@
 using System.Diagnostics;
 using Grpc.Core;
 using Grpc.Net.Client;
+using MarketSimulator.Services;
 using Orderbook; // Ensure this matches your proto package name
 
 namespace MarketSimulator;
@@ -43,18 +44,28 @@ class Program
 
         var listOfEngineCommands = new List<EngineCommand>((int)(TotalOrders * 1.2));
 
-        for (var i = 0; i < TotalOrders; i++)
-        {
-            var addCancel = Random.Shared.Next(7) == 0;
-            listOfEngineCommands.Add(GenerateRandomOrderRequest(i));
+        // for (var i = 0; i < TotalOrders; i++)
+        // {
+        //     var addCancel = Random.Shared.Next(7) == 0;
+        //     listOfEngineCommands.Add(GenerateRandomOrderRequest(i));
+        //
+        //     if (addCancel)
+        //     {
+        //         listOfEngineCommands.Add(GenerateRandomCancelRequest(i));
+        //     }
+        // }
+        
 
-            if (addCancel)
-            {
-                listOfEngineCommands.Add(GenerateRandomCancelRequest(i));
-            }
-        }
+        Console.WriteLine($"⚡ [SETUP] Streaming Binance Market Data from Mac SSD...");
 
-        var engineCommands = listOfEngineCommands.ToArray();
+
+        string filePath = "/Users/alex/Projects/OrderMatchingData/binance_raw_data_20260222_174402.jsonl";
+        var jsonLinesStream = File.ReadLines(filePath);
+
+        var parser = new BinanceDataParser();
+        var engineCommands = parser.ParseLines(jsonLinesStream).ToArray();
+
+        Console.WriteLine($"✅ Loaded {engineCommands.Length:N0} commands into RAM ready for benchmark.");
 
 
         Console.WriteLine("\n💀 Select benchmark mode:");
