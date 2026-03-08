@@ -13,6 +13,7 @@ class Program
     private const int TotalOrders = 10_000_000;
     private const string Address = "http://127.0.0.1:50051";
     private const int Concurrency = 4;
+    private const int BatchSize = 5000;
 
     static async Task Main(string[] args)
     {
@@ -84,20 +85,10 @@ class Program
         }
         else
         {
-            int[] testBatchSizes = { 5000 };
-
-            Console.WriteLine($"\n🕵️‍♂️ 啟動自動尋找最佳 Batch Size (Sweet Spot) 測試...");
-            Console.WriteLine($"| Batch Size | TPS (Orders/sec) | Latency p50 (ms) | Latency p99 (ms) |");
-            Console.WriteLine($"|------------|------------------|------------------|------------------|");
-
-
-            foreach (var size in testBatchSizes)
-            {
                 GC.Collect();
 
+                await RunBatchingTest(client, engineCommands, BatchSize);
 
-                await RunBatchingTest(client, engineCommands, size);
-            }
         }
     }
 

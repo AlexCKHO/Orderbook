@@ -26,14 +26,14 @@ public class BinanceDataParser
 
             BinanceMessage msg = null;
 
-            // 🛡️ 加入 try-catch 攔截 64KB 截斷 / 格式錯誤嘅 JSON
+
             try
             {
                 msg = JsonSerializer.Deserialize<BinanceMessage>(actualJson);
             }
             catch (JsonException)
             {
-                // 遇到爛 JSON，記錄數量，然後直接 skip 呢一行，繼續處理下一行
+
                 CorruptedLinesCount++;
                 continue; 
             }
