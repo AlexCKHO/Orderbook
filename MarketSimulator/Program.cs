@@ -3,7 +3,8 @@ using System.Diagnostics;
 using Grpc.Core;
 using Grpc.Net.Client;
 using MarketSimulator.Services;
-using Orderbook; // Ensure this matches your proto package name
+using Orderbook; 
+using Microsoft.Extensions.Configuration;
 
 namespace MarketSimulator;
 
@@ -59,8 +60,12 @@ class Program
 
         Console.WriteLine($"⚡ [SETUP] Streaming Binance Market Data from Mac SSD...");
 
+        var config = new ConfigurationBuilder()
+            .AddJsonFile("appsettings.json")
+            .Build();
 
-        string filePath = "/Users/alex/Projects/OrderMatchingData/binance_raw_data_20260222_174402.jsonl";
+        string filePath = config["DataSettings:BinanceDataPath"];
+        
         var jsonLinesStream = File.ReadLines(filePath);
 
         var parser = new BinanceDataParser();
