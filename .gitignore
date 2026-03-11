@@ -10,6 +10,9 @@ target/
 # ===========================
 # C# / .NET Ignored Files
 # ===========================
+# Local application settings
+appsettings.local.json
+
 # Ignore compiled Binary and Object files (in any directory depth)
 [Bb]in/
 [Oo]bj/

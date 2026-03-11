@@ -8,20 +8,21 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <PackageReference Include="Google.Protobuf" Version="3.34.0-rc1" />
+        <PackageReference Include="Google.Protobuf" Version="3.34.0-rc1"/>
+        <PackageReference Include="Grpc.Core" Version="2.46.6"/>
         <PackageReference Include="Grpc.Net.Client" Version="2.76.0"/>
         <PackageReference Include="Grpc.Tools" Version="2.76.0">
-          <PrivateAssets>all</PrivateAssets>
-          <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+            <PrivateAssets>all</PrivateAssets>
+            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
         </PackageReference>
-        <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="11.0.0-preview.1.26104.118" />
+        <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="11.0.0-preview.1.26104.118"/>
     </ItemGroup>
 
     <ItemGroup>
-        <Protobuf Include="..\Protos\orderbook.proto" GrpcServices="Client" />
+        <Protobuf Include="..\Protos\orderbook.proto" GrpcServices="Client"/>
     </ItemGroup>
     <ItemGroup>
-        <None Update="appsettings.json">
+        <None Update="appsettings.local.json">
             <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
         </None>
     </ItemGroup>

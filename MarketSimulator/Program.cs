@@ -3,7 +3,7 @@ using System.Diagnostics;
 using Grpc.Core;
 using Grpc.Net.Client;
 using MarketSimulator.Services;
-using Orderbook; 
+using Orderbook;
 using Microsoft.Extensions.Configuration;
 
 namespace MarketSimulator;
@@ -56,16 +56,16 @@ class Program
         //         listOfEngineCommands.Add(GenerateRandomCancelRequest(i));
         //     }
         // }
-        
+
 
         Console.WriteLine($"⚡ [SETUP] Streaming Binance Market Data from Mac SSD...");
 
         var config = new ConfigurationBuilder()
-            .AddJsonFile("appsettings.json")
+            .AddJsonFile("appsettings.local.json")
             .Build();
 
         string filePath = config["DataSettings:BinanceDataPath"];
-        
+
         var jsonLinesStream = File.ReadLines(filePath);
 
         var parser = new BinanceDataParser();
@@ -86,14 +86,13 @@ class Program
 
         if (choice == "1")
         {
+            GC.Collect();
             await RunStreamingTest(client, engineCommands);
         }
         else
         {
-                GC.Collect();
-
-                await RunBatchingTest(client, engineCommands, BatchSize);
-
+            GC.Collect();
+            await RunBatchingTest(client, engineCommands, BatchSize);
         }
     }
 
@@ -157,7 +156,7 @@ class Program
                         reqId = req.CancelOrder.Id;
                     }
 
-                    if (req.PlaceOrder.Id % 1000 == 0)
+                    if (reqId % 1000 == 0)
                     {
                         sentTimestamps[reqId] = Stopwatch.GetTimestamp();
                     }
