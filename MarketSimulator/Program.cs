@@ -1,7 +1,8 @@
 ﻿using System.Collections.Concurrent;
 using System.Diagnostics;
+using Confluent.Kafka;
+using Google.Protobuf;
 using Grpc.Core;
-using Grpc.Net.Client;
 using MarketSimulator.Services;
 using Orderbook;
 using Microsoft.Extensions.Configuration;
@@ -18,47 +19,31 @@ class Program
 
     static async Task Main(string[] args)
     {
-        // Network tuning for low-latency RPCs
-        var httpHandler = new SocketsHttpHandler
+        // 🏆 Interview Essential: High-Frequency Trading (HFT) Kafka Producer Tuning
+        var producerConfig = new ProducerConfig
         {
-            EnableMultipleHttp2Connections = true,
+            // Points to the Redpanda/Kafka instance 
+            BootstrapServers = "localhost:19092",
 
-            ConnectTimeout = TimeSpan.FromSeconds(5)
+            // 1. Acks.Leader (The balance between Throughput and Durability)
+            // Don't wait for all replicas to acknowledge. Once the Leader receives it, return "Success".
+            // This significantly boosts TPS (Transactions Per Second).
+            Acks = Acks.Leader,
+
+            // 2. LingerMs (The "Micro-batching" Magic)
+            // Instead of sending every single message immediately, wait for 2ms.
+            // This allows the producer to group thousands of messages into a single batch,
+            // drastically reducing the number of requests and overhead.
+            LingerMs = 2,
+
+            // 3. Compression (Optimizing Network Bandwidth)
+            // Compresses data before sending. LZ4 is often preferred for its high speed and low CPU overhead.
+            CompressionType = CompressionType.Lz4
         };
 
-        using var channel = GrpcChannel.ForAddress(Address, new GrpcChannelOptions
-        {
-            HttpHandler = httpHandler,
-            // Bump buffer limits to support massive throughput during batching
-            MaxReceiveMessageSize = 16 * 1024 * 1024,
-            MaxSendMessageSize = 16 * 1024 * 1024
-        });
+        using var producer = new ProducerBuilder<byte[], byte[]>(producerConfig).Build();
 
-        var client = new MatchingEngine.MatchingEngineClient(channel);
-
-        Console.WriteLine($"⚡ [SETUP] Pre-generating {TotalOrders:N0} orders in RAM...");
-
-        // Pre-allocate objects to isolate GC overhead from our benchmark measurements
-
-        // var orderRequest = Enumerable.Range(0, TotalOrders).Select(i => GenerateRandomOrderRequest(i)).ToArray();
-
-        // var cancelRequest = Enumerable.Range(0, TotalOrders).Select(i => GenerateRandomCancelRequest(i)).ToArray();
-
-        var listOfEngineCommands = new List<EngineCommand>((int)(TotalOrders * 1.2));
-
-        // for (var i = 0; i < TotalOrders; i++)
-        // {
-        //     var addCancel = Random.Shared.Next(7) == 0;
-        //     listOfEngineCommands.Add(GenerateRandomOrderRequest(i));
-        //
-        //     if (addCancel)
-        //     {
-        //         listOfEngineCommands.Add(GenerateRandomCancelRequest(i));
-        //     }
-        // }
-
-
-        Console.WriteLine($"⚡ [SETUP] Streaming Binance Market Data from Mac SSD...");
+        Console.WriteLine($"⚡ [SETUP] Configuring Kafka Producer...");
 
         var config = new ConfigurationBuilder()
             .AddJsonFile("appsettings.local.json")
@@ -70,15 +55,20 @@ class Program
 
         var parser = new BinanceDataParser();
         var engineCommands = parser.ParseLines(jsonLinesStream).ToArray();
+        var listOfCommands = new List<byte[]>();
+        foreach (var command in engineCommands)
+        {
+            listOfCommands.Add(command.ToByteArray());
+        }
+
 
         Console.WriteLine($"✅ Loaded {engineCommands.Length:N0} commands into RAM ready for benchmark.");
-
-
         Console.WriteLine("\n💀 Select benchmark mode:");
         Console.WriteLine("1. HFT Streaming (Precision tracking via Request ID)");
         Console.WriteLine("2. Batching (FIFO Latency estimation)");
         Console.Write("Selection [1 or 2]: ");
         var choice = Console.ReadLine();
+
 
         // Trigger manual GC to sweep setup artifacts before starting the timer
         GC.Collect();
@@ -87,12 +77,12 @@ class Program
         if (choice == "1")
         {
             GC.Collect();
-            await RunStreamingTest(client, engineCommands);
+            await RunSequentialMarketReplay(producer, listOfCommands);
         }
         else
         {
             GC.Collect();
-            await RunBatchingTest(client, engineCommands, BatchSize);
+            // await RunBatchingTest(client, engineCommands, BatchSize);
         }
     }
 
@@ -100,87 +90,51 @@ class Program
     // MODE 1: HFT STREAMING
     // Tracks latency by matching RequestId in response
     // ==========================================
-    private static async Task RunStreamingTest(MatchingEngine.MatchingEngineClient client, EngineCommand[] orders)
+
+    private static async Task RunSequentialMarketReplay(IProducer<byte[], byte[]> producer, List<byte[]> commands)
     {
-        // Scale concurrency based on logical cores (typically 4-8 yields the best throughput)
-
-        Console.WriteLine($"🚀 Launching HFT Streaming ({Concurrency} Concurrent Streams)...");
-
-        var sentTimestamps = new ConcurrentDictionary<ulong, long>();
-        var latencies = new ConcurrentBag<double>();
+        Console.WriteLine($"🚀 Launching Sequential Market Replay (Strict FIFO)...");
 
         var sw = Stopwatch.StartNew();
         int successCount = 0;
+        byte[] routingKey = System.Text.Encoding.UTF8.GetBytes("BTC_USDT");
 
-        // Partition the 100M orders across worker threads
-        int chunkSize = orders.Length / Concurrency;
-        var tasks = new List<Task>();
-
-        for (int i = 0; i < Concurrency; i++)
+        foreach (var command in commands)
         {
-            int taskIndex = i;
-            var chunk = orders.Skip(taskIndex * chunkSize).Take(chunkSize).ToArray();
+            var message = new Message<byte[], byte[]> { Key = routingKey, Value = command };
 
-            // Spin up a dedicated gRPC stream per task to avoid head-of-line blocking
-            tasks.Add(Task.Run(async () =>
-            {
-                using var call = client.PlaceOrderStream();
-
-                var reader = Task.Run(async () =>
+            producer.Produce("engine-commands-topic", message, deliveryReport =>
                 {
-                    await foreach (var resp in call.ResponseStream.ReadAllAsync())
+                    if (deliveryReport.Error.IsFatal)
                     {
-                        if (sentTimestamps.TryRemove(resp.RequestId, out long startTicks))
-                        {
-                            latencies.Add(GetElapsedMs(startTicks));
-                        }
-
-                        if (resp.Success)
-                        {
-                            Interlocked.Increment(ref successCount);
-                        }
+                        Console.WriteLine($"Delivery failed: {deliveryReport.Error.Reason}");
                     }
-                });
-
-                // Hot path: Sender loop
-                foreach (var req in chunk)
-                {
-                    ulong reqId = 0;
-
-                    if (req.CommandCase == EngineCommand.CommandOneofCase.PlaceOrder)
+                    else
                     {
-                        reqId = req.PlaceOrder.Id;
+                        // ToAsk what is Interlocked?
+                        Interlocked.Increment(ref successCount);
                     }
-                    else if (req.CommandCase == EngineCommand.CommandOneofCase.CancelOrder)
-                    {
-                        reqId = req.CancelOrder.Id;
-                    }
-
-                    if (reqId % 1000 == 0)
-                    {
-                        sentTimestamps[reqId] = Stopwatch.GetTimestamp();
-                    }
-
-                    await call.RequestStream.WriteAsync(req);
                 }
-
-                await call.RequestStream.CompleteAsync();
-                await reader;
-            }));
+            );
         }
-
-        // Wait for all concurrent streams to flush and close
-        await Task.WhenAll(tasks);
+        // ToAsk what is buffer? 
+        producer.Flush(TimeSpan.FromSeconds(10));
         sw.Stop();
 
-        PrintReport("HFT MULTI-STREAMING", sw, successCount, latencies);
+        Console.WriteLine($"\n========================================");
+        Console.WriteLine($"🏁 SEQUENTIAL REPLAY RESULT");
+        Console.WriteLine($"========================================");
+        Console.WriteLine($"⚡ TPS: {successCount / sw.Elapsed.TotalSeconds:N0} messages/sec");
+        Console.WriteLine($"✅ Delivered to Kafka: {successCount:N0}");
+        Console.WriteLine($"========================================");
     }
 
     // ==========================================
     // MODE 2: BATCHING
     // Tracks latency using strict FIFO assumptions
     // ==========================================
-    private static async Task RunBatchingTest(MatchingEngine.MatchingEngineClient client, EngineCommand[] orders,
+    private static async Task RunSequentialMarketReplay(MatchingEngine.MatchingEngineClient client,
+        EngineCommand[] orders,
         int batchSize = 5_000)
     {
         const int repeat = 5;
