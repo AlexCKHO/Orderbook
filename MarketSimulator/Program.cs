@@ -55,12 +55,6 @@ class Program
 
         var parser = new BinanceDataParser();
         var engineCommands = parser.ParseLines(jsonLinesStream).ToArray();
-        var listOfCommands = new List<byte[]>();
-        foreach (var command in engineCommands)
-        {
-            listOfCommands.Add(command.ToByteArray());
-        }
-
 
         Console.WriteLine($"✅ Loaded {engineCommands.Length:N0} commands into RAM ready for benchmark.");
         Console.WriteLine("\n💀 Select benchmark mode:");
@@ -77,12 +71,12 @@ class Program
         if (choice == "1")
         {
             GC.Collect();
-            await RunSequentialMarketReplay(producer, listOfCommands);
+            RunSequentialMarketReplay(producer, engineCommands);
         }
         else
         {
             GC.Collect();
-            // await RunBatchingTest(client, engineCommands, BatchSize);
+            await RunBatchMarketReplay(producer, engineCommands, BatchSize);
         }
     }
 
@@ -91,7 +85,7 @@ class Program
     // Tracks latency by matching RequestId in response
     // ==========================================
 
-    private static async Task RunSequentialMarketReplay(IProducer<byte[], byte[]> producer, List<byte[]> commands)
+    private static void RunSequentialMarketReplay(IProducer<byte[], byte[]> producer, EngineCommand[] commands)
     {
         Console.WriteLine($"🚀 Launching Sequential Market Replay (Strict FIFO)...");
 
@@ -99,7 +93,9 @@ class Program
         int successCount = 0;
         byte[] routingKey = System.Text.Encoding.UTF8.GetBytes("BTC_USDT");
 
-        foreach (var command in commands)
+        var listOfCommands = commands.Select(c => c.ToByteArray()).ToList();
+
+        foreach (var command in listOfCommands)
         {
             var message = new Message<byte[], byte[]> { Key = routingKey, Value = command };
 
@@ -117,10 +113,11 @@ class Program
                 }
             );
         }
+
         // ToAsk what is buffer? 
         producer.Flush(TimeSpan.FromSeconds(10));
         sw.Stop();
-
+        // Get 
         Console.WriteLine($"\n========================================");
         Console.WriteLine($"🏁 SEQUENTIAL REPLAY RESULT");
         Console.WriteLine($"========================================");
@@ -133,84 +130,81 @@ class Program
     // MODE 2: BATCHING
     // Tracks latency using strict FIFO assumptions
     // ==========================================
-    private static async Task RunSequentialMarketReplay(MatchingEngine.MatchingEngineClient client,
-        EngineCommand[] orders,
+    private static async Task RunBatchMarketReplay(IProducer<byte[], byte[]> producer,
+        EngineCommand[] commands,
         int batchSize = 5_000)
     {
-        const int repeat = 5;
-
         Console.WriteLine($"\n🚀 [BENCHMARK] Starting Batching (Size: {batchSize}, Streams: {Concurrency})...");
 
-        // Pre-compute all batches to keep allocation out of the benchmark hot loop
-        var batches = orders.Chunk(batchSize).Select(chunk => new EngineBatchCommand()
-        {
-            Commands = { chunk }
-        }).ToArray();
-
-
-        int chunkSize = batches.Length / Concurrency;
-
-        for (int k = 0; k < repeat; k++)
-        {
-            var latencies = new ConcurrentBag<double>();
-            int totalProcessed = 0;
-
-            // Partition batches across concurrent tasks
-
-            var tasks = new List<Task>();
-
-            var sw = Stopwatch.StartNew();
-
-
-            for (int i = 0; i < Concurrency; i++)
+        byte[][] byteBatches = commands
+            .Chunk(batchSize)
+            .Select(chunk =>
             {
-                int taskIndex = i;
-                var batchChunk = batches.Skip(taskIndex * chunkSize).Take(chunkSize).ToArray();
+                var batch = new EngineBatchCommand();
+                batch.Commands.AddRange(chunk);
+                return batch.ToByteArray();
+            })
+            .ToArray();
 
-                tasks.Add(Task.Run(async () =>
-                {
-                    using var call = client.PlaceBatchStream();
+        var tasks = new List<Task>();
 
-                    // Each stream maintains its own FIFO queue for precise latency tracking 
-                    // avoiding global lock contention
-                    var batchTimestamps = new ConcurrentQueue<long>();
 
-                    // Background reader to process ACKs asynchronously
-                    var reader = Task.Run(async () =>
-                    {
-                        await foreach (var resp in call.ResponseStream.ReadAllAsync())
-                        {
-                            // Map responses back to requests assuming strict FIFO ordering per stream
-                            if (batchTimestamps.TryDequeue(out long startTicks) && startTicks > 0)
-                            {
-                                latencies.Add(GetElapsedMs(startTicks));
-                            }
+        var sw = Stopwatch.StartNew();
+        int successCount = 0;
 
-                            Interlocked.Add(ref totalProcessed, (int)resp.ProcessedCount);
-                        }
-                    });
+        byte[] routingKey = System.Text.Encoding.UTF8.GetBytes("BTC_USDT");
 
-                    // Hot path for sending batches
-                    for (int j = 0; j < batchChunk.Length; j++)
-                    {
-                        // Sample every 100th batch per stream. (-1 implies ignored sample)
-                        long timestampToQueue = (j % 100 == 0) ? Stopwatch.GetTimestamp() : -1;
+        int start = 0;
 
-                        // Enqueue timestamp *before* sending to prevent race conditions with the reader task
-                        batchTimestamps.Enqueue(timestampToQueue);
-                        await call.RequestStream.WriteAsync(batchChunk[j]);
-                    }
+        var batchesPerTask = byteBatches.Length / Concurrency;
 
-                    await call.RequestStream.CompleteAsync();
-                    await reader;
-                }));
+        for (int i = 0; i < Concurrency; i++)
+        {
+            int localStart = start;
+
+            //int localEnd = i == Concurrency - 1 ? localStart + (batchesPerTask + byteBatches.Length % Concurrency) : localStart + batchesPerTask;
+            
+            int localEnd = localStart + batchesPerTask;
+
+            if (i == Concurrency - 1)
+            {
+                localEnd = byteBatches.Length;
             }
 
-            await Task.WhenAll(tasks);
-            sw.Stop();
+            tasks.Add(Task.Run(() =>
+                {
+                    for (int j = localStart; j < localEnd; j++)
+                    {
+                        var message = new Message<byte[], byte[]> { Key = routingKey, Value = byteBatches[j] };
 
-            PrintReport($"MULTI-BATCHING (x{Concurrency})", sw, totalProcessed, latencies);
+                        producer.Produce("engine-commands-topic", message, deliveryReport =>
+                        {
+                            if (deliveryReport.Error.IsFatal)
+                            {
+                                Console.WriteLine($"Delivery failed: {deliveryReport.Error.Reason}");
+                            }
+                            else
+                            {
+                                Interlocked.Increment(ref successCount);
+                            }
+                        });
+                    }
+                }
+            ));
+
+            start += batchesPerTask;
         }
+
+        await Task.WhenAll(tasks);
+        producer.Flush(TimeSpan.FromSeconds(10));
+
+        sw.Stop();
+        Console.WriteLine($"\n========================================");
+        Console.WriteLine($"🏁 SEQUENTIAL REPLAY RESULT");
+        Console.WriteLine($"========================================");
+        Console.WriteLine($"⚡ TPS: {successCount / sw.Elapsed.TotalSeconds:N0} messages/sec");
+        Console.WriteLine($"✅ Delivered to Kafka: {successCount:N0}");
+        Console.WriteLine($"========================================");
     }
 
     private static EngineCommand GenerateRandomOrderRequest(int index)
