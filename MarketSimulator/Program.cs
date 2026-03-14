@@ -49,14 +49,60 @@ class Program
             .AddJsonFile("appsettings.local.json")
             .Build();
 
-        string filePath = config["DataSettings:BinanceDataPath"];
+        Console.WriteLine($"⚡ [SETUP] Setting up Binance trade Data");
 
-        var jsonLinesStream = File.ReadLines(filePath);
+        var binPath = config["DataSettings:BinanceBinaryDataPath"];
+        var jsonPath = config["DataSettings:BinanceJsonDataPath"];
+        var engineCommands = new List<EngineCommand>();
 
-        var parser = new BinanceDataParser();
-        var engineCommands = parser.ParseLines(jsonLinesStream).ToArray();
+        try
+        {
+            if (File.Exists(binPath))
+            {
+                using var input = File.OpenRead(binPath);
+                while (input.Position < input.Length)
+                {
+                    var command = EngineCommand.Parser.ParseDelimitedFrom(input);
+                    if (command != null) engineCommands.Add(command);
+                }
 
-        Console.WriteLine($"✅ Loaded {engineCommands.Length:N0} commands into RAM ready for benchmark.");
+                Console.WriteLine($"Binary file exists, engineCommands's count: {engineCommands.Count}");
+            }
+        }
+        catch (InvalidProtocolBufferException ex)
+        {
+            // The file exists but the data inside is corrupted
+            Console.WriteLine($"Binary data is corrupted: {ex.Message}");
+        }
+        catch (IOException ex)
+        {
+            // Log that the binary was locked or unreadable, then fall through to JSON
+            Console.WriteLine($"Binary read failed, falling back to JSON: {ex.Message}");
+        }
+
+
+        // Fallback logic
+        if (engineCommands.Count == 0 && File.Exists(jsonPath))
+        {
+            Console.WriteLine($"Binary file does not exist, parsing json file");
+            try
+            {
+                var parser = new BinanceDataParser();
+                engineCommands = parser.ParseLines(File.ReadLines(jsonPath)).ToList();
+
+                using var output = File.Create(binPath);
+                foreach (var command in engineCommands)
+                {
+                    command.WriteDelimitedTo(output);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Critical error processing JSON/Binary: {ex.Message}");
+            }
+        }
+
+        Console.WriteLine($"✅ Loaded {engineCommands.Count:N0} commands into RAM ready for benchmark.");
         Console.WriteLine("\n💀 Select benchmark mode:");
         Console.WriteLine("1. HFT Streaming (Precision tracking via Request ID)");
         Console.WriteLine("2. Batching (FIFO Latency estimation)");
@@ -71,12 +117,12 @@ class Program
         if (choice == "1")
         {
             GC.Collect();
-            RunSequentialMarketReplay(producer, engineCommands);
+            RunSequentialMarketReplay(producer, engineCommands.ToArray());
         }
         else
         {
             GC.Collect();
-            await RunBatchMarketReplay(producer, engineCommands, BatchSize);
+            await RunBatchMarketReplay(producer, engineCommands.ToArray(), BatchSize);
         }
     }
 
@@ -163,7 +209,7 @@ class Program
             int localStart = start;
 
             //int localEnd = i == Concurrency - 1 ? localStart + (batchesPerTask + byteBatches.Length % Concurrency) : localStart + batchesPerTask;
-            
+
             int localEnd = localStart + batchesPerTask;
 
             if (i == Concurrency - 1)
