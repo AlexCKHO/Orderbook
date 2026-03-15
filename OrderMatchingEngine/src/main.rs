@@ -1,6 +1,6 @@
+use rdkafka::consumer::StreamConsumer;
+use rdkafka::error::KafkaError::ClientConfig;
 use tokio;
-use tonic::transport::Server;
-use crate::orderbook_grpc::matching_engine_server::MatchingEngineServer;
 use crate::services::matching_engine_service::MatchingEngineService;
 
 mod orderbook_grpc {
@@ -8,16 +8,13 @@ mod orderbook_grpc {
 }
 mod models;
 mod services;
-
-
+mod infrastructure;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() {
 
-    println!("Hello, world!");
 
-    // A. Setting Address (Localhost : Port 50051)
-    let addr = "127.0.0.1:50051".parse()?;
+    let addr = "localhost:9092";
 
     //B. Setting up the service
     // Here will call the MatchingEngineService::new() to initiate the OrderBook
@@ -25,11 +22,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("🚀 Rust Matching Engine is listening on {}", addr);
 
-    Server::builder()
-        .add_service(MatchingEngineServer::new(service))
-        .serve(addr)
-        .await?;
 
-    Ok(())
+
+
 
 }
