@@ -1,29 +1,27 @@
-use rdkafka::consumer::StreamConsumer;
-use rdkafka::error::KafkaError::ClientConfig;
+use crate::infrastructure::redpanda::RedpandaConsumer;
+use std::sync::Arc;
 use tokio;
-use crate::services::matching_engine_service::MatchingEngineService;
 
 mod orderbook_grpc {
     tonic::include_proto!("orderbook");
 }
+mod infrastructure;
 mod models;
 mod services;
-mod infrastructure;
 
 #[tokio::main]
 async fn main() {
+    let consumer = RedpandaConsumer::new(
+        "localhost:9092",
+        "matching_engine_btc",
+        "engine-commands-topic",
+    );
 
-
-    let addr = "localhost:9092";
-
-    //B. Setting up the service
-    // Here will call the MatchingEngineService::new() to initiate the OrderBook
-    let service = MatchingEngineService::new();
-
-    println!("🚀 Rust Matching Engine is listening on {}", addr);
-
-
+    let consumer_arc = Arc::new(consumer);
+    consumer_arc.start().await;
 
 
 
+    tokio::signal::ctrl_c().await.unwrap();
+    println!("Shutting down gracefully...");
 }
