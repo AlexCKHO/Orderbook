@@ -33,9 +33,16 @@ enum OrderCommand {
         commands: Vec<EngineAction>,
         responder: mpsc::Sender<Result<OrderBatchResponse, Status>>,
     },
+
+    KafkaCommand {
+        command: EngineAction,
+    },
 }
 
-fn run_matching_actor(mut rx: mpsc::Receiver<OrderCommand>) {
+fn run_matching_actor(
+    mut rx: mpsc::Receiver<OrderCommand>,
+    event_publisher: mpsc::Sender<Vec<InternalEvent>>,
+) {
     tokio::spawn(async move {
         let mut order_book = OrderBook::new();
 
@@ -63,6 +70,14 @@ fn run_matching_actor(mut rx: mpsc::Receiver<OrderCommand>) {
 
                     // Fire-and-forget: send directly to the gRPC response channel
                     let _ = responder.try_send(Ok(resp));
+                }
+
+                OrderCommand::KafkaCommand { command } => {
+                    let events = order_book.process_single(command);
+
+                    if !events.is_empty() {
+                        let _ = event_publisher.try_send(events);
+                    }
                 }
             }
         }
@@ -119,26 +134,33 @@ impl MatchingEngineService {
             .into_iter()
             .map(|event| {
                 let event_data = match event {
-                    InternalEvent::OrderPlaced { id, price, qty, side } => {
-                        EventData::Placed(orderbook_grpc::OrderPlaced {
-                            id,
-                            price,
-                            qty,
-                            side: match side {
-                                Side::Bid => 1,
-                                Side::Ask => 2,
-                            },
-                        })
-                    }
-                    InternalEvent::TradeExecuted { maker_id, taker_id, price, qty, timestamp } => {
-                        EventData::Filled(orderbook_grpc::TradeExecuted {
-                            maker_id,
-                            taker_id,
-                            price,
-                            qty,
-                            timestamp,
-                        })
-                    }
+                    InternalEvent::OrderPlaced {
+                        id,
+                        price,
+                        qty,
+                        side,
+                    } => EventData::Placed(orderbook_grpc::OrderPlaced {
+                        id,
+                        price,
+                        qty,
+                        side: match side {
+                            Side::Bid => 1,
+                            Side::Ask => 2,
+                        },
+                    }),
+                    InternalEvent::TradeExecuted {
+                        maker_id,
+                        taker_id,
+                        price,
+                        qty,
+                        timestamp,
+                    } => EventData::Filled(orderbook_grpc::TradeExecuted {
+                        maker_id,
+                        taker_id,
+                        price,
+                        qty,
+                        timestamp,
+                    }),
                     InternalEvent::OrderCancelled { id, cancelled_qty } => {
                         EventData::Cancelled(orderbook_grpc::OrderCancelled { id, cancelled_qty })
                     }
@@ -165,7 +187,9 @@ impl MatchingEngineService {
         sender: mpsc::Sender<OrderCommand>,
         req: EngineCommand,
     ) -> Result<OrderResponse, Status> {
-        let command = req.command.ok_or_else(|| Status::invalid_argument("Empty command"))?;
+        let command = req
+            .command
+            .ok_or_else(|| Status::invalid_argument("Empty command"))?;
 
         let (engine_action, request_id) = match command {
             Command::PlaceOrder(order_entry) => {
@@ -245,7 +269,8 @@ impl MatchingEngine for MatchingEngineService {
         ))
     }
 
-    type PlaceBatchStreamStream = Pin<Box<dyn Stream<Item = Result<OrderBatchResponse, Status>> + Send>>;
+    type PlaceBatchStreamStream =
+        Pin<Box<dyn Stream<Item = Result<OrderBatchResponse, Status>> + Send>>;
 
     async fn place_batch_stream(
         &self,
@@ -265,8 +290,12 @@ impl MatchingEngine for MatchingEngineService {
                 for command in batch_req.commands {
                     if let Some(cmd) = command.command {
                         let parsed_action = match cmd {
-                            Command::PlaceOrder(order_entry) => Self::parse_proto_order(order_entry),
-                            Command::CancelOrder(cancel_entry) => Self::parse_proto_cancel_request(cancel_entry),
+                            Command::PlaceOrder(order_entry) => {
+                                Self::parse_proto_order(order_entry)
+                            }
+                            Command::CancelOrder(cancel_entry) => {
+                                Self::parse_proto_cancel_request(cancel_entry)
+                            }
                         };
 
                         if let Ok(action) = parsed_action {
