@@ -1,7 +1,14 @@
+use crate::models::events::MatchEvent;
+use crate::orderbook_grpc;
+use crate::services::matching_engine_service::MatchingEngineService;
+use prost::Message as ProstMessage;
 use rdkafka::Message;
 use rdkafka::config::ClientConfig;
 use rdkafka::consumer::{CommitMode, Consumer, StreamConsumer};
+use rdkafka::producer::{FutureProducer, FutureRecord};
 use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::mpsc;
 
 pub struct RedpandaConsumer {
     brokers: String,
@@ -18,7 +25,7 @@ impl RedpandaConsumer {
         }
     }
 
-    pub async fn start(self: Arc<Self>) {
+    pub async fn start_event_consumer(self: Arc<Self>) {
         let consumer: StreamConsumer = ClientConfig::new()
             .set("bootstrap.servers", &self.brokers)
             // Group ID evenly distributes partitions across all consumer instances
@@ -44,7 +51,6 @@ impl RedpandaConsumer {
         // `move` transfers ownership of 'consumer' to the background task,
         // ensuring it lives as long as the task runs without lifetime issues.
         tokio::spawn(async move {
-
             // Infinite loop to continuously process incoming messages.
             loop {
                 // recv() polls the broker for new messages.
@@ -75,3 +81,24 @@ impl RedpandaConsumer {
 // THE WORK: Extracts the payload as a borrowed &str, referencing existing memory rather than copying data.
 // THE RECEIPT: Calls commit_message to update the offset. This tells Redpanda: "Message #10 is finished; send #11 next."
 // THE JUMP & REPEAT: The loop restarts instantly. It either grabs the next queued message or returns to The Wait state.
+
+pub async fn start_event_producer(
+    brokers: &str,
+    topic: &str,
+    mut outbound_rx: mpsc::Receiver<Vec<MatchEvent>>,
+) {
+    let producer: FutureProducer = ClientConfig::new()
+        .set("bootstrap.servers", brokers)
+        .set("message.timeout.ms", "5000")
+        .create()
+        .expect("Producer creation error");
+
+    let topic = topic.to_string();
+
+    tokio::spawn(async move {
+        // Listen to the channel coming from the OrderBook actor
+        while let Some(events) = outbound_rx.recv().await {
+            let proto_events = MatchingEngineService::parser_to_grpc
+        }
+    });
+}

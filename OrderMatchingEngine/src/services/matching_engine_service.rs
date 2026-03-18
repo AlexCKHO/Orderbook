@@ -25,22 +25,10 @@ pub struct MatchingEngineService {
 }
 
 enum OrderCommand {
-    PlaceOrder {
-        command: EngineAction,
-        resp: oneshot::Sender<Vec<InternalEvent>>,
-    },
-    PlaceOrderBatchStream {
-        commands: Vec<EngineAction>,
-        responder: mpsc::Sender<Result<OrderBatchResponse, Status>>,
-    },
-
-    KafkaCommand {
-        command: EngineAction,
-    },
+    KafkaCommand { command: EngineAction },
 }
 
-fn run_matching_actor(
-    mut rx: mpsc::Receiver<OrderCommand>,
+pub fn run_matching_actor(
     event_publisher: mpsc::Sender<Vec<InternalEvent>>,
 ) {
     tokio::spawn(async move {
@@ -48,30 +36,6 @@ fn run_matching_actor(
 
         while let Some(cmd) = rx.recv().await {
             match cmd {
-                OrderCommand::PlaceOrder { command, resp } => {
-                    let events = order_book.process_single(command);
-                    let _ = resp.send(events);
-                }
-
-                OrderCommand::PlaceOrderBatchStream {
-                    commands,
-                    responder,
-                } => {
-                    let count = commands.len();
-
-                    // Synchronous matching (CPU bound, avoids context switching)
-                    order_book.process_batch(commands);
-
-                    let resp = OrderBatchResponse {
-                        success: true,
-                        message: "Batch processed successfully".to_string(),
-                        processed_count: count as u64,
-                    };
-
-                    // Fire-and-forget: send directly to the gRPC response channel
-                    let _ = responder.try_send(Ok(resp));
-                }
-
                 OrderCommand::KafkaCommand { command } => {
                     let events = order_book.process_single(command);
 
@@ -129,7 +93,7 @@ impl MatchingEngineService {
         Ok(EngineAction::Cancel(CancelEntry { id: req.id }))
     }
 
-    fn parse_to_grpc_events(events: Vec<MatchEvent>) -> Vec<orderbook_grpc::MatchEvent> {
+    pub fn to_protobuf_events(events: Vec<MatchEvent>) -> Vec<orderbook_grpc::MatchEvent> {
         events
             .into_iter()
             .map(|event| {
@@ -221,7 +185,7 @@ impl MatchingEngineService {
             .await
             .map_err(|_| Status::internal("Actor offline"))?;
 
-        let proto_events = Self::parse_to_grpc_events(internal_events);
+        let proto_events = Self::to_protobuf_events(internal_events);
 
         Ok(OrderResponse {
             success: true,
