@@ -117,12 +117,12 @@ class Program
         if (choice == "1")
         {
             GC.Collect();
-            RunSequentialMarketReplay(producer, engineCommands.ToArray());
+            SendOrderSequentially(producer, engineCommands.ToArray());
         }
         else
         {
             GC.Collect();
-            await RunBatchMarketReplay(producer, engineCommands.ToArray(), BatchSize);
+            await SendOrdersByBatch(producer, engineCommands.ToArray(), BatchSize);
         }
     }
 
@@ -131,7 +131,7 @@ class Program
     // Tracks latency by matching RequestId in response
     // ==========================================
 
-    private static void RunSequentialMarketReplay(IProducer<byte[], byte[]> producer, EngineCommand[] commands)
+    private static void SendOrderSequentially(IProducer<byte[], byte[]> producer, EngineCommand[] commands)
     {
         Console.WriteLine($"🚀 Launching Sequential Market Replay (Strict FIFO)...");
 
@@ -176,7 +176,7 @@ class Program
     // MODE 2: BATCHING
     // Tracks latency using strict FIFO assumptions
     // ==========================================
-    private static async Task RunBatchMarketReplay(IProducer<byte[], byte[]> producer,
+    private static async Task SendOrdersByBatch(IProducer<byte[], byte[]> producer,
         EngineCommand[] commands,
         int batchSize = 5_000)
     {
