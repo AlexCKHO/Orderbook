@@ -1,6 +1,5 @@
 use crate::models::events::MatchEvent;
-use crate::orderbook_grpc;
-use crate::services::matching_engine_service::MatchingEngineService;
+use crate::orderbook_grpc::MatchEvent as ProtoMatchEvent;
 use prost::Message as ProstMessage;
 use rdkafka::Message;
 use rdkafka::config::ClientConfig;
@@ -96,9 +95,14 @@ pub async fn start_event_producer(
     let topic = topic.to_string();
 
     tokio::spawn(async move {
-        // Listen to the channel coming from the OrderBook actor
         while let Some(events) = outbound_rx.recv().await {
-            let proto_events = MatchingEngineService::parser_to_grpc
+            for proto_event in events {
+                let bytes = ProtoMatchEvent::from(proto_event).encode_to_vec();
+
+                let record = FutureRecord::to(&topic).payload(&bytes).key("BTC-USD");
+
+                let _ = producer.send(record, Duration::from_secs(0)).await;
+            }
         }
     });
 }
