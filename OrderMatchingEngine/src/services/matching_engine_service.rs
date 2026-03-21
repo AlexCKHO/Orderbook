@@ -29,18 +29,19 @@ enum OrderCommand {
 }
 
 pub fn run_matching_actor(
-    event_publisher: mpsc::Sender<Vec<InternalEvent>>,
+    mut inbound_rx: mpsc::Receiver<OrderCommand>,
+    outbound_tx: mpsc::Sender<Vec<MatchEvent>>,
 ) {
     tokio::spawn(async move {
         let mut order_book = OrderBook::new();
 
-        while let Some(cmd) = rx.recv().await {
+        while let Some(cmd) = inbound_rx.recv().await {
             match cmd {
                 OrderCommand::KafkaCommand { command } => {
                     let events = order_book.process_single(command);
 
                     if !events.is_empty() {
-                        let _ = event_publisher.try_send(events);
+                        let _ = outbound_tx.try_send(events).await;
                     }
                 }
             }
