@@ -32,67 +32,77 @@ impl RedpandaConsumer {
         }
     }
 
-    pub async fn start_event_consumer(self: Arc<Self>) {
-        let consumer: StreamConsumer = ClientConfig::new()
-            .set("bootstrap.servers", &self.brokers)
-            // Group ID evenly distributes partitions across all consumer instances
-            // subscribed to the same topic.
-            .set("group.id", &self.group_id)
-            // Disable auto-commit to take manual control over when a message
-            // is marked as fully processed.
-            .set("enable.auto.commit", "false")
-            // Start reading from the earliest available message if no prior
-            // offset exists for this group.
-            .set("auto.offset.reset", "earliest")
-            .create()
-            .expect("Consumer creation failed");
+    pub async fn start_event_consumer(self: Arc<Self>, concurrency: usize) {
+        for i in 0..concurrency {
+            let topic = self.topic.clone();
+            let brokers = self.brokers.clone();
+            let group_id = self.group_id.clone();
+            let inbound_tx = self.inbound_tx.clone();
 
-        // Subscribe the consumer to the specified topic.
-        consumer
-            .subscribe(&[&self.topic])
-            .expect("Failed to subscribe to topic");
+            println!("Started Redpanda worker for topic: {}", topic);
 
-        println!("Started Redpanda worker for topic: {}", self.topic);
+            // `tokio::spawn` runs this block as an asynchronous background task.
+            // `move` transfers ownership of 'consumer' to the background task,
+            // ensuring it lives as long as the task runs without lifetime issues.
+            tokio::spawn(async move {
+                println!("[Worker {}] Starting consumer for {}", i, topic);
 
-        // `tokio::spawn` runs this block as an asynchronous background task.
-        // `move` transfers ownership of 'consumer' to the background task,
-        // ensuring it lives as long as the task runs without lifetime issues.
-        tokio::spawn(async move {
-            // Infinite loop to continuously process incoming messages.
-            loop {
-                // recv() polls the broker for new messages.
-                // .await yields execution to the Tokio runtime while waiting,
-                // freeing up the thread for other tasks.
-                match consumer.recv().await {
-                    Err(e) => eprint!("Kafka error: {}", e),
-                    Ok(msg) => {
-                        // Unwrap the incoming Kafka message as array of u8
-                        if let Some(bytes) = msg.payload() {
-                            match EngineCommand::decode(bytes) {
-                                Ok(proto_struct) => {
-                                    if let Err(e) = &self.inbound_tx.send(proto_struct).await {
-                                        eprint!("Channel Closed {}" e)
+                let consumer: StreamConsumer = ClientConfig::new()
+                    .set("bootstrap.servers", brokers)
+                    // Group ID evenly distributes partitions across all consumer instances
+                    // subscribed to the same topic.
+                    .set("group.id", group_id)
+                    // Disable auto-commit to take manual control over when a message
+                    // is marked as fully processed.
+                    .set("enable.auto.commit", "false")
+                    // Start reading from the earliest available message if no prior
+                    // offset exists for this group.
+                    .set("auto.offset.reset", "earliest")
+                    .create()
+                    .expect("Consumer creation failed");
+
+                // Subscribe the consumer to the specified topic.
+                consumer
+                    .subscribe(&[&topic])
+                    .expect("Failed to subscribe to topic");
+
+                // Infinite loop to continuously process incoming messages.
+                loop {
+                    // recv() polls the broker for new messages.
+                    // .await yields execution to the Tokio runtime while waiting,
+                    // freeing up the thread for other tasks.
+                    match consumer.recv().await {
+                        Err(e) => eprint!("Kafka error: {}", e),
+                        Ok(msg) => {
+                            // Unwrap the incoming Kafka message as array of u8
+                            if let Some(bytes) = msg.payload() {
+                                match EngineCommand::decode(bytes) {
+                                    Ok(proto_struct) => {
+                                        if let Err(e) = inbound_tx.send(proto_struct).await {
+                                            eprint!("Channel Closed {}", e)
+                                        }
+                                    }
+                                    Err(e) => {
+                                        eprint!(
+                                            "Failed to convert incoming Kafka message to EngineCommand {}",
+                                            e
+                                        )
                                     }
                                 }
-                                Err(e) => {
-                                    eprint!(
-                                        "Failed to convert incoming Kafka message to EngineCommand {}" e
-                                    )
-                                }
+                            } else {
+                                eprint!("Received empty payload, skipping...")
                             }
-                        } else {
-                            eprint!("Received empty payload, skipping...")
-                        }
 
-                        // Manually commit the offset, telling Redpanda this
-                        // specific message is "Done".
-                        if let Err(e) = consumer.commit_message(&msg, CommitMode::Async) {
-                            eprint!("Failed to commit offset: {}", e)
+                            // Manually commit the offset, telling Redpanda this
+                            // specific message is "Done".
+                            if let Err(e) = consumer.commit_message(&msg, CommitMode::Async) {
+                                eprint!("Failed to commit offset: {}", e)
+                            }
                         }
                     }
                 }
-            }
-        });
+            });
+        }
     }
 }
 
@@ -125,7 +135,7 @@ impl RedpandaProducer {
         }
     }
 
-    pub async fn start_event_producer(self: Arc<Self>) {
+    pub async fn start_event_producer(self) {
         let producer: FutureProducer = ClientConfig::new()
             .set("bootstrap.servers", &self.brokers)
             .set("message.timeout.ms", "5000")
@@ -134,8 +144,10 @@ impl RedpandaProducer {
 
         let topic = &self.topic.to_string();
 
+        let mut rx = self.outbound_rx;
+
         tokio::spawn(async move {
-            while let Some(events) = &self.outbound_rx.recv().await {
+            while let Some(events) = rx.recv().await {
                 for proto_event in events {
                     let bytes = ProtoMatchEvent::from(proto_event).encode_to_vec();
 
