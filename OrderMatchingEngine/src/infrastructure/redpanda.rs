@@ -1,6 +1,6 @@
 use crate::models::events::MatchEvent;
-use crate::orderbook_grpc;
-use crate::orderbook_grpc::{EngineCommand, MatchEvent as ProtoMatchEvent};
+use crate::models::order::EngineAction;
+use crate::orderbook_grpc::{EngineBatchCommand, MatchEvent as ProtoMatchEvent};
 use prost::Message as ProstMessage;
 use rdkafka::Message;
 use rdkafka::config::ClientConfig;
@@ -14,7 +14,7 @@ pub struct RedpandaConsumer {
     brokers: String,
     group_id: String,
     topic: String,
-    inbound_tx: mpsc::Sender<EngineCommand>,
+    inbound_tx: mpsc::Sender<EngineAction>,
 }
 
 impl RedpandaConsumer {
@@ -22,7 +22,7 @@ impl RedpandaConsumer {
         brokers: &str,
         group_id: &str,
         topic: &str,
-        inbound_tx: mpsc::Sender<EngineCommand>,
+        inbound_tx: mpsc::Sender<EngineAction>,
     ) -> Self {
         Self {
             brokers: brokers.to_string(),
@@ -76,10 +76,18 @@ impl RedpandaConsumer {
                         Ok(msg) => {
                             // Unwrap the incoming Kafka message as array of u8
                             if let Some(bytes) = msg.payload() {
-                                match EngineCommand::decode(bytes) {
-                                    Ok(proto_struct) => {
-                                        if let Err(e) = inbound_tx.send(proto_struct).await {
-                                            eprint!("Channel Closed {}", e)
+                                println!("📥 [DEBUG] Received payload size: {} bytes", bytes.len());
+                                match EngineBatchCommand::decode(bytes) {
+                                    Ok(engineBatchCommand) => {
+                                        for engineCommand in engineBatchCommand.commands {
+                                            if let Ok(engine_action) =
+                                                EngineAction::try_from(engineCommand)
+                                            {
+                                                if let Err(e) = inbound_tx.send(engine_action).await
+                                                {
+                                                    eprint!("Channel Closed {}", e)
+                                                }
+                                            }
                                         }
                                     }
                                     Err(e) => {
@@ -117,43 +125,39 @@ pub struct RedpandaProducer {
     brokers: String,
     group_id: String,
     topic: String,
-    outbound_rx: mpsc::Receiver<Vec<MatchEvent>>,
 }
 
 impl RedpandaProducer {
-    pub fn new(
-        brokers: &str,
-        group_id: &str,
-        topic: &str,
-        outbound_rx: mpsc::Receiver<Vec<MatchEvent>>,
-    ) -> Self {
+    pub fn new(brokers: &str, group_id: &str, topic: &str) -> Self {
         Self {
             brokers: brokers.to_string(),
             group_id: group_id.to_string(),
             topic: topic.to_string(),
-            outbound_rx,
         }
     }
 
-    pub async fn start_event_producer(self) {
+    pub async fn start_event_producer(self, outbound_rx: mpsc::Receiver<Vec<MatchEvent>>) {
+        println!("Here:::::! start_event_producer");
         let producer: FutureProducer = ClientConfig::new()
             .set("bootstrap.servers", &self.brokers)
             .set("message.timeout.ms", "5000")
             .create()
             .expect("Producer creation error");
 
-        let topic = &self.topic.to_string();
 
-        let mut rx = self.outbound_rx;
+        let topic_name = self.topic.clone();
+        let mut rx = outbound_rx;
 
         tokio::spawn(async move {
             while let Some(events) = rx.recv().await {
                 for proto_event in events {
                     let bytes = ProtoMatchEvent::from(proto_event).encode_to_vec();
 
-                    let record = FutureRecord::to(&topic).payload(&bytes).key("BTC-USD");
+                    let record = FutureRecord::to(&topic_name).payload(&bytes).key("BTC-USD");
 
-                    let _ = producer.send(record, Duration::from_secs(0)).await;
+                    if let Err((e, _)) = producer.send(record, Duration::from_secs(0)).await {
+                        eprintln!("Failed to produce event: {:?}", e);
+                    }
                 }
             }
         });

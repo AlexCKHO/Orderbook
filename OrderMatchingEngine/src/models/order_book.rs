@@ -191,7 +191,9 @@ impl OrderBook {
             id: new_bid_order.id,
             price: new_bid_order.price,
             qty: new_bid_order.qty,
-            side: new_bid_order.side,
+            side:  new_bid_order.side,
+
+
         });
         self.bids
             .entry(new_bid_order.price) // 1. Locate the specific price level in the bid side of the book

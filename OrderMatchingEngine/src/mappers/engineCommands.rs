@@ -1,6 +1,7 @@
-use std::time::{SystemTime, UNIX_EPOCH};
 use crate::models::order::{CancelEntry, EngineAction, OrderEntry, OrderType, Side};
-use crate::orderbook_grpc::{CancelRequest, OrderRequest};
+use crate::orderbook_grpc::engine_command::Command;
+use crate::orderbook_grpc::{CancelRequest, EngineCommand, OrderRequest};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub struct MapperError(pub String);
 
@@ -36,9 +37,27 @@ impl TryFrom<OrderRequest> for EngineAction {
     }
 }
 
-impl From <CancelRequest> for EngineAction {
+impl From<CancelRequest> for EngineAction {
     fn from(req: CancelRequest) -> Self {
         EngineAction::Cancel(CancelEntry { id: req.id })
     }
+}
 
+impl TryFrom<EngineCommand> for EngineAction {
+    type Error = MapperError;
+
+    fn try_from(req: EngineCommand) -> Result<Self, Self::Error> {
+        // Unpack the envelope (oneof payload)
+        match req.command {
+            Some(Command::PlaceOrder(order_req)) => {
+                // Call the TryFrom<OrderRequest> implementation defined above
+                EngineAction::try_from(order_req)
+            }
+            Some(Command::CancelOrder(cancel_req)) => {
+                // Call the From<CancelRequest> implementation defined above
+                Ok(EngineAction::from(cancel_req))
+            }
+            None => Err(MapperError("Received empty EngineCommand (None)".into())),
+        }
+    }
 }
