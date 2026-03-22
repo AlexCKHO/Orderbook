@@ -1,4 +1,6 @@
-use crate::infrastructure::redpanda::RedpandaConsumer;
+use crate::infrastructure::redpanda::{RedpandaConsumer, RedpandaProducer};
+use crate::models::events::MatchEvent;
+use crate::orderbook_grpc::EngineCommand;
 use crate::services::matching_engine_service::{MatchingEngineService, run_matching_actor};
 use std::sync::Arc;
 use tokio;
@@ -8,23 +10,36 @@ mod orderbook_grpc {
     tonic::include_proto!("orderbook");
 }
 mod infrastructure;
+mod mappers;
 mod models;
 mod services;
-mod mappers;
 
 #[tokio::main]
 async fn main() {
+    // -- Setting up mpsc pipes for communication between engine and redpanda
+    let (inbound_tx, inbound_rx) = mpsc::channel::<EngineCommand>(10000); // For incoming kafka message
+    let (outbound_tx, outbound_rx) = mpsc::channel::<Vec<MatchEvent>>(10000); // For outgoing event to kafka
+
+    // Setting up kafka consumer
     let consumer = RedpandaConsumer::new(
         "localhost:9092",
         "matching_engine_btc",
         "engine-commands-topic",
+        inbound_tx,
     );
 
     let consumer_arc = Arc::new(consumer);
     consumer_arc.start_event_consumer().await;
 
-    let (tx, rx) = mpsc::channel(10000); // Input to Engine
-    let (event_tx, event_rx) = mpsc::channel(10000);
+    let producer = RedpandaProducer::new(
+        "localhost:9092",
+        "matching_engine_btc",
+        "engine-commands-topic",
+        outbound_rx,
+    );
+
+    let producer_arc = Arc::new(producer);
+    producer_arc.start_event_producer().await;
 
     let service = MatchingEngineService::new();
 

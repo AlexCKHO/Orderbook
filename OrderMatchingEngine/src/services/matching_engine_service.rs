@@ -57,7 +57,7 @@ impl MatchingEngineService {
         // keeping tail latencies low while maintaining maximum CPU throughput.
         let (tx, rx) = mpsc::channel(4);
 
-        run_matching_actor(rx);
+        run_matching_actor(rx, tx);
 
         Self { sender: tx }
     }

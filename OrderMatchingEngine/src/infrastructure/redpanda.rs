@@ -1,5 +1,6 @@
 use crate::models::events::MatchEvent;
-use crate::orderbook_grpc::MatchEvent as ProtoMatchEvent;
+use crate::orderbook_grpc;
+use crate::orderbook_grpc::{EngineCommand, MatchEvent as ProtoMatchEvent};
 use prost::Message as ProstMessage;
 use rdkafka::Message;
 use rdkafka::config::ClientConfig;
@@ -13,14 +14,21 @@ pub struct RedpandaConsumer {
     brokers: String,
     group_id: String,
     topic: String,
+    inbound_tx: mpsc::Sender<EngineCommand>,
 }
 
 impl RedpandaConsumer {
-    pub fn new(brokers: &str, group_id: &str, topic: &str) -> Self {
+    pub fn new(
+        brokers: &str,
+        group_id: &str,
+        topic: &str,
+        inbound_tx: mpsc::Sender<EngineCommand>,
+    ) -> Self {
         Self {
             brokers: brokers.to_string(),
             group_id: group_id.to_string(),
             topic: topic.to_string(),
+            inbound_tx,
         }
     }
 
@@ -58,9 +66,23 @@ impl RedpandaConsumer {
                 match consumer.recv().await {
                     Err(e) => eprint!("Kafka error: {}", e),
                     Ok(msg) => {
-                        // Treat the incoming raw message bytes as a string slice (&str).
-                        let payload = msg.payload_view::<str>().unwrap_or(Ok("")).unwrap_or("");
-                        println!("Processing: {}", payload);
+                        // Unwrap the incoming Kafka message as array of u8
+                        if let Some(bytes) = msg.payload() {
+                            match EngineCommand::decode(bytes) {
+                                Ok(proto_struct) => {
+                                    if let Err(e) = &self.inbound_tx.send(proto_struct).await {
+                                        eprint!("Channel Closed {}" e)
+                                    }
+                                }
+                                Err(e) => {
+                                    eprint!(
+                                        "Failed to convert incoming Kafka message to EngineCommand {}" e
+                                    )
+                                }
+                            }
+                        } else {
+                            eprint!("Received empty payload, skipping...")
+                        }
 
                         // Manually commit the offset, telling Redpanda this
                         // specific message is "Done".
@@ -81,28 +103,47 @@ impl RedpandaConsumer {
 // THE RECEIPT: Calls commit_message to update the offset. This tells Redpanda: "Message #10 is finished; send #11 next."
 // THE JUMP & REPEAT: The loop restarts instantly. It either grabs the next queued message or returns to The Wait state.
 
-pub async fn start_event_producer(
-    brokers: &str,
-    topic: &str,
-    mut outbound_rx: mpsc::Receiver<Vec<MatchEvent>>,
-) {
-    let producer: FutureProducer = ClientConfig::new()
-        .set("bootstrap.servers", brokers)
-        .set("message.timeout.ms", "5000")
-        .create()
-        .expect("Producer creation error");
+pub struct RedpandaProducer {
+    brokers: String,
+    group_id: String,
+    topic: String,
+    outbound_rx: mpsc::Receiver<Vec<MatchEvent>>,
+}
 
-    let topic = topic.to_string();
-
-    tokio::spawn(async move {
-        while let Some(events) = outbound_rx.recv().await {
-            for proto_event in events {
-                let bytes = ProtoMatchEvent::from(proto_event).encode_to_vec();
-
-                let record = FutureRecord::to(&topic).payload(&bytes).key("BTC-USD");
-
-                let _ = producer.send(record, Duration::from_secs(0)).await;
-            }
+impl RedpandaProducer {
+    pub fn new(
+        brokers: &str,
+        group_id: &str,
+        topic: &str,
+        outbound_rx: mpsc::Receiver<Vec<MatchEvent>>,
+    ) -> Self {
+        Self {
+            brokers: brokers.to_string(),
+            group_id: group_id.to_string(),
+            topic: topic.to_string(),
+            outbound_rx,
         }
-    });
+    }
+
+    pub async fn start_event_producer(self: Arc<Self>) {
+        let producer: FutureProducer = ClientConfig::new()
+            .set("bootstrap.servers", &self.brokers)
+            .set("message.timeout.ms", "5000")
+            .create()
+            .expect("Producer creation error");
+
+        let topic = &self.topic.to_string();
+
+        tokio::spawn(async move {
+            while let Some(events) = &self.outbound_rx.recv().await {
+                for proto_event in events {
+                    let bytes = ProtoMatchEvent::from(proto_event).encode_to_vec();
+
+                    let record = FutureRecord::to(&topic).payload(&bytes).key("BTC-USD");
+
+                    let _ = producer.send(record, Duration::from_secs(0)).await;
+                }
+            }
+        });
+    }
 }
