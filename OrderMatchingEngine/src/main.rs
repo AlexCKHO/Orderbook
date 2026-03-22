@@ -29,21 +29,39 @@ async fn main() {
 
     // Setting up kafka consumer
     let consumer = RedpandaConsumer::new(&cfg.brokers, &cfg.group_id, &cfg.cmd_topic, inbound_tx);
-
     let consumer_arc = Arc::new(consumer);
-    consumer_arc.start_event_consumer(cfg.concurrency).await;
+    let mut handles = Vec::new();
+    for i in 0..cfg.concurrency {
+        let c = Arc::clone(&consumer_arc);
+        handles.push(tokio::spawn(async move {
+            c.start_event_consumer(i).await;
+        }));
+    }
 
+    // Setting up kafka producer
     let producer = RedpandaProducer::new(&cfg.brokers, &cfg.group_id, &cfg.events_topic);
-
-    let producer_arc = producer;
-    producer_arc.start_event_producer(outbound_rx).await;
-
-    let service = MatchingEngineService::new(outbound_tx);
-
-    tokio::spawn(async move {
-        service.run_matching_actor(inbound_rx);
+    let producer_handle = tokio::spawn(async move {
+        producer.start_event_producer(outbound_rx).await;
     });
 
-    tokio::signal::ctrl_c().await.unwrap();
-    println!("Shutting down gracefully...");
+    let service = MatchingEngineService::new(outbound_tx);
+    let engine_handle = tokio::spawn(async move {
+        service.run_matching_actor(inbound_rx).await;
+    });
+
+    // 喺 main 尾部
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {
+            println!("Received Ctrl+C, shutting down...");
+        },
+        res = futures::future::select_all(handles) => {
+            eprintln!("One of the consumer workers died: {:?}", res);
+        },
+        res = producer_handle => {
+            eprintln!("Producer task exited unexpectedly: {:?}", res);
+        },
+        res = engine_handle => {
+            eprintln!("Engine task exited unexpectedly: {:?}", res);
+        },
+    }
 }

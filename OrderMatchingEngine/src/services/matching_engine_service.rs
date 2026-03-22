@@ -15,17 +15,18 @@ impl MatchingEngineService {
         Self { outbound_tx }
     }
 
-    pub fn run_matching_actor(self, mut inbound_rx: mpsc::Receiver<EngineAction>) {
-        tokio::spawn(async move {
-            let mut order_book = OrderBook::new();
+    pub async fn run_matching_actor(mut self, mut inbound_rx: mpsc::Receiver<EngineAction>) {
+        let mut order_book = OrderBook::new();
 
-            while let Some(cmd) = inbound_rx.recv().await {
-                let events = order_book.process_single(cmd);
+        while let Some(cmd) = inbound_rx.recv().await {
+            let events = order_book.process_single(cmd);
 
-                if !events.is_empty() {
-                    let _ = self.outbound_tx.try_send(events);
+            if !events.is_empty() {
+                if let Err(e) = self.outbound_tx.send(events).await {
+                    eprintln!("Critical Error: Outbound channel closed: {}", e);
+                    break;
                 }
             }
-        });
+        }
     }
 }
