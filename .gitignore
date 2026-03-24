@@ -3,9 +3,11 @@
 # ===========================
 # Critical Fix: Removed leading "/" to ensure target/ folders in subdirectories are ignored
 target/
+*.env
 
 # Backup files
 **/*.rs.bk
+
 
 # ===========================
 # C# / .NET Ignored Files

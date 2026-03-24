@@ -1,7 +1,6 @@
 syntax = "proto3";
 package orderbook;
 
-// --- Enums ---
 enum Side {
   SIDE_UNSPECIFIED = 0;
   BID = 1;
@@ -14,27 +13,24 @@ enum OrderType {
   MARKET = 2;
 }
 
-// ---  Cancel Reject Reason ---
 enum CancelRejectReason {
   REASON_UNSPECIFIED = 0;
   ORDER_NOT_FOUND = 1;
 }
 
-// --- Request Models ---
-message OrderRequest {
-  uint64 id = 1;
-  uint64 price = 2;
-  uint64 qty = 3;
+message OrderRequest {  
+  fixed64 client_id = 1;
+  fixed64 price = 2;
+  fixed64 qty = 3;
   Side side = 4;
   OrderType order_type = 5;
   int64 timestamp = 6;
 }
 
 message CancelRequest {
-  uint64 id = 1;
+  fixed64 client_id = 1;
 }
 
-// --- Single Request ---
 message EngineCommand {
   oneof command {
     OrderRequest place_order = 1;
@@ -42,17 +38,41 @@ message EngineCommand {
   }
 }
 
-//  Batch Request 
 message EngineBatchCommand {
   repeated EngineCommand commands = 1;
 }
 
-// --- Event Models ---
-message OrderPlaced { uint64 id = 1; uint64 price = 2; uint64 qty = 3; Side side = 4; }
-message TradeExecuted { uint64 maker_id = 1; uint64 taker_id = 2; uint64 price = 3; uint64 qty = 4; int64 timestamp = 5; }
-message OrderCancelled { uint64 id = 1; uint64 cancelled_qty = 2; }
-message OrderKilled { uint64 id = 1; uint64 killed_qty = 2; }
-message CancelRejected { uint64 id = 1; CancelRejectReason reason = 2; }
+message OrderPlaced { 
+  fixed64 client_id = 1; 
+  fixed64 price = 2; 
+  fixed64 qty = 3; 
+  Side side = 4; 
+}
+
+message TradeExecuted { 
+  fixed64 maker_id = 1; 
+  fixed64 taker_id = 2; 
+  fixed64 price = 3; 
+  fixed64 qty = 4;
+  int64 timestamp = 5;
+  Side taker_side = 6;
+  fixed64 trade_id = 7;
+}
+
+message OrderCancelled { 
+  fixed64 client_id = 1; 
+  fixed64 cancelled_qty = 2; 
+}
+
+message OrderKilled { 
+  fixed64 client_id = 1; 
+  fixed64 killed_qty = 2; 
+}
+
+message CancelRejected { 
+  fixed64 client_id = 1; 
+  CancelRejectReason reason = 2; 
+}
 
 message MatchEvent {
   oneof event_data {
@@ -64,22 +84,15 @@ message MatchEvent {
   }
 }
 
-// --- Response Models ---
-message OrderResponse {
-  bool success = 1;
-  string message = 2;
-  repeated MatchEvent events = 3;
-  uint64 request_id = 4;
-}
-
 message OrderBatchResponse {
   bool success = 1;
   string message = 2;
-  uint64 processed_count = 3; 
+  uint64 queued_count = 3; 
 }
 
-// --- Service Definition ---
+message SubscribeRequest {}
+
 service MatchingEngine {
-  rpc PlaceOrderStream (stream EngineCommand) returns (stream OrderResponse);
   rpc PlaceBatchStream (stream EngineBatchCommand) returns (stream OrderBatchResponse);
+  rpc SubscribeEvents (SubscribeRequest) returns (stream MatchEvent);
 }

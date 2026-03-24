@@ -27,7 +27,7 @@ impl TryFrom<OrderRequest> for EngineAction {
             .as_nanos() as i64;
 
         Ok(EngineAction::Create(OrderEntry {
-            id: req.id,
+            client_id: req.client_id,
             price: req.price,
             qty: req.qty,
             side,
@@ -39,7 +39,9 @@ impl TryFrom<OrderRequest> for EngineAction {
 
 impl From<CancelRequest> for EngineAction {
     fn from(req: CancelRequest) -> Self {
-        EngineAction::Cancel(CancelEntry { id: req.id })
+        EngineAction::Cancel(CancelEntry {
+            client_id: req.client_id,
+        })
     }
 }
 

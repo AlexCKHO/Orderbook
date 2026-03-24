@@ -20,7 +20,7 @@ pub enum EngineAction {
 
 #[derive(Debug, Clone)]
 pub struct OrderEntry {
-    pub id: u64,
+    pub client_id: u64,
     pub price: u64,
     pub qty: u64,
     pub side: Side,
@@ -37,10 +37,10 @@ pub struct OrderEntry {
     //
     // 3. Debugging & Replay
     // During periods of high market volatility or extreme throughput, logs can become chaotic. Without precise timestamps, it is nearly impossible to reconstruct the exact sequence of events or determine which specific order triggered a trade.
-    pub timestamp: i64
+    pub timestamp: i64,
 }
 
 #[derive(Debug, Clone)]
 pub struct CancelEntry {
-    pub id: u64,
+    pub client_id: u64,
 }

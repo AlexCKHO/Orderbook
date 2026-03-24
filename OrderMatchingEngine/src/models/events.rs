@@ -9,7 +9,7 @@ pub enum CancelRejectReason {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum MatchEvent {
     OrderPlaced {
-        id: u64,
+        client_id: u64,
         price: u64,
         qty: u64,
         side: Side,
@@ -20,17 +20,19 @@ pub enum MatchEvent {
         price: u64,
         qty: u64,
         timestamp: i64,
-    }, //Timestamp Unix Timestamp in Nanoseconds for record purpose
+        taker_side: Side,
+        trade_id: u64,
+    },
     OrderCancelled {
-        id: u64,
+        client_id: u64,
         cancelled_qty: u64,
     },
     CancelRejected {
-        id: u64,
+        client_id: u64,
         reason: CancelRejectReason,
     },
     OrderKilled {
-        id: u64,
+        client_id: u64,
         killed_qty: u64,
     },
 }

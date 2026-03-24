@@ -10,12 +10,13 @@ impl From<MatchEvent> for protoMatchEvent {
     fn from(event: MatchEvent) -> protoMatchEvent {
         let event_data = match event {
             MatchEvent::OrderPlaced {
-                id,
+                client_id,
                 price,
                 qty,
                 side,
+                ..
             } => EventData::Placed(orderbook_grpc::OrderPlaced {
-                id,
+                client_id,
                 price,
                 qty,
                 side: match side {
@@ -29,22 +30,38 @@ impl From<MatchEvent> for protoMatchEvent {
                 price,
                 qty,
                 timestamp,
+                taker_side,
+                trade_id,
             } => EventData::Filled(orderbook_grpc::TradeExecuted {
                 maker_id,
                 taker_id,
                 price,
                 qty,
                 timestamp,
+                taker_side: match taker_side {
+                    Side::Bid => 1,
+                    Side::Ask => 2,
+                },
+                trade_id,
             }),
-            MatchEvent::OrderCancelled { id, cancelled_qty } => {
-                EventData::Cancelled(orderbook_grpc::OrderCancelled { id, cancelled_qty })
-            }
-            MatchEvent::OrderKilled { id, killed_qty } => {
-                EventData::Killed(orderbook_grpc::OrderKilled { id, killed_qty })
-            }
-            MatchEvent::CancelRejected { id, reason } => {
+            MatchEvent::OrderCancelled {
+                client_id,
+                cancelled_qty,
+                ..
+            } => EventData::Cancelled(orderbook_grpc::OrderCancelled {
+                client_id,
+                cancelled_qty,
+            }),
+            MatchEvent::OrderKilled {
+                client_id,
+                killed_qty,
+            } => EventData::Killed(orderbook_grpc::OrderKilled {
+                client_id,
+                killed_qty,
+            }),
+            MatchEvent::CancelRejected { client_id, reason } => {
                 EventData::Rejected(orderbook_grpc::CancelRejected {
-                    id,
+                    client_id,
                     reason: match reason {
                         CancelRejectReason::OrderNotFound => 1,
                     },

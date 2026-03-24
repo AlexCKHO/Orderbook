@@ -131,7 +131,7 @@ impl RedpandaProducer {
         }
     }
 
-    pub async fn start_event_producer(self, outbound_rx: mpsc::Receiver<Vec<MatchEvent>>) {
+    pub async fn start_event_producer(self, outbound_rx: mpsc::Receiver<MatchEvent>) {
         println!("Here:::::! start_event_producer");
         let producer: FutureProducer = ClientConfig::new()
             .set("bootstrap.servers", &self.brokers)
@@ -142,15 +142,13 @@ impl RedpandaProducer {
         let topic_name = self.topic.clone();
         let mut rx = outbound_rx;
 
-        while let Some(events) = rx.recv().await {
-            for proto_event in events {
-                let bytes = ProtoMatchEvent::from(proto_event).encode_to_vec();
+        while let Some(event) = rx.recv().await {
+            let bytes = ProtoMatchEvent::from(event).encode_to_vec();
 
-                let record = FutureRecord::to(&topic_name).payload(&bytes).key("BTC-USD");
-                println!("🎯 Sending event");
-                if let Err((e, _)) = producer.send(record, Duration::from_secs(0)).await {
-                    eprintln!("Failed to produce event: {:?}", e);
-                }
+            let record = FutureRecord::to(&topic_name).payload(&bytes).key("BTC-USD");
+            println!("🎯 Sending event");
+            if let Err((e, _)) = producer.send(record, Duration::from_secs(0)).await {
+                eprintln!("Failed to produce event: {:?}", e);
             }
         }
     }

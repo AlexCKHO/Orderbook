@@ -4,19 +4,21 @@ use std::collections::{BTreeMap, HashMap, VecDeque};
 
 // Note: Order book on Tokio Integrating Sync Logic with Async Runtime
 pub struct OrderBook {
-    // FIFO;
     pub asks: BTreeMap<u64, VecDeque<OrderEntry>>,
     pub bids: BTreeMap<u64, VecDeque<OrderEntry>>,
-    // Order.id, (Order.pice, Side)
     pub order_locations: HashMap<u64, (u64, Side)>,
+    pub engine_order_id: u64,
+    pub trade_id: u64,
 }
 
 impl OrderBook {
-    pub fn new() -> Self {
+    pub fn new(engine_order_id: u64, trade_id: u64) -> Self {
         OrderBook {
             bids: BTreeMap::new(),
             asks: BTreeMap::new(),
             order_locations: HashMap::new(),
+            engine_order_id,
+            trade_id,
         }
     }
 
@@ -25,28 +27,30 @@ impl OrderBook {
         self.asks.clear();
         self.order_locations.clear();
     }
-    pub fn add_order(&mut self, order: OrderEntry) -> Vec<MatchEvent> {
-        let mut events = Vec::new();
-
+    pub fn add_order(&mut self, order: OrderEntry, events_buffer: &mut Vec<MatchEvent>) {
         if order.side == Side::Bid {
-            self.match_new_bid(order, &mut events);
+            self.match_new_bid(order, events_buffer);
         } else if order.side == Side::Ask {
-            self.match_new_ask(order, &mut events);
+            self.match_new_ask(order, events_buffer);
         }
-
-        events
     }
 
-    pub fn cancel_order(&mut self, order_id: u64) -> Vec<MatchEvent> {
+    fn next_engine_id(&mut self) -> u64 {
+        let engine_id = self.engine_order_id;
+        self.engine_order_id += 1;
+        engine_id
+    }
+
+    pub fn cancel_order(&mut self, order_id: u64) {
         let mut events = Vec::new();
         let (price, side) = match self.order_locations.remove(&order_id) {
             Some(loc) => loc,
             None => {
                 events.push(MatchEvent::CancelRejected {
-                    id: order_id,
+                    client_id: order_id,
                     reason: CancelRejectReason::OrderNotFound,
                 });
-                return events;
+                return;
             }
         };
 
@@ -56,11 +60,11 @@ impl OrderBook {
         };
 
         if let Some(queue) = book.get_mut(&price) {
-            if let Some(position) = queue.iter().position(|o| o.id == order_id) {
+            if let Some(position) = queue.iter().position(|o| o.client_id == order_id) {
                 let cancelled_order = queue.remove(position).unwrap();
 
                 events.push(MatchEvent::OrderCancelled {
-                    id: cancelled_order.id,
+                    client_id: cancelled_order.client_id,
                     cancelled_qty: cancelled_order.qty,
                 });
 
@@ -69,20 +73,27 @@ impl OrderBook {
                 }
             }
         }
-
-        events
     }
 
-    pub fn process_batch(&mut self, commands: Vec<EngineAction>) {
+    pub fn process_batch(
+        &mut self,
+        commands: Vec<EngineAction>,
+        events_buffer: &mut Vec<MatchEvent>,
+    ) {
+        events_buffer.clear();
+
         for command in commands {
-            self.process_single(command);
+            self.process_single(command, events_buffer);
         }
     }
 
-    pub fn process_single(&mut self, command: EngineAction) -> Vec<MatchEvent> {
+    pub fn process_single(&mut self, command: EngineAction, events_buffer: &mut Vec<MatchEvent>) {
         match command {
-            EngineAction::Create(order) => self.add_order(order),
-            EngineAction::Cancel(cancel) => self.cancel_order(cancel.id),
+            EngineAction::Create(mut order) => {
+                order.client_id = self.next_engine_id();
+                self.add_order(order, events_buffer)
+            }
+            EngineAction::Cancel(cancel) => self.cancel_order(cancel.client_id),
         }
     }
 
@@ -101,17 +112,22 @@ impl OrderBook {
                 new_bid_order.qty -= match_qty;
                 best_ask_order.qty -= match_qty;
 
+                let current_trade_id = self.trade_id;
+                self.trade_id += 1;
+
                 events.push(MatchEvent::TradeExecuted {
-                    maker_id: best_ask_order.id,
-                    taker_id: new_bid_order.id,
+                    maker_id: best_ask_order.client_id,
+                    taker_id: new_bid_order.client_id,
                     price: best_ask_order.price,
                     qty: match_qty,
                     timestamp: new_bid_order.timestamp,
+                    taker_side: new_bid_order.side,
+                    trade_id: current_trade_id,
                 });
 
                 if best_ask_order.qty == 0 {
                     let removed_order = ask_queue.pop_front().unwrap();
-                    self.order_locations.remove(&removed_order.id);
+                    self.order_locations.remove(&removed_order.client_id);
                 }
 
                 if ask_queue.is_empty() {
@@ -127,7 +143,7 @@ impl OrderBook {
                 self.add_order_to_bids(new_bid_order, events);
             } else if new_bid_order.order_type == OrderType::Market {
                 events.push(MatchEvent::OrderKilled {
-                    id: new_bid_order.id,
+                    client_id: new_bid_order.client_id,
                     killed_qty: new_bid_order.qty,
                 })
             }
@@ -150,17 +166,22 @@ impl OrderBook {
                 new_ask_order.qty -= match_qty;
                 best_bid_order.qty -= match_qty;
 
+                let current_trade_id = self.trade_id;
+                self.trade_id += 1;
+
                 events.push(MatchEvent::TradeExecuted {
-                    maker_id: best_bid_order.id,
-                    taker_id: new_ask_order.id,
+                    maker_id: best_bid_order.client_id,
+                    taker_id: new_ask_order.client_id,
                     price: best_bid_order.price,
                     qty: match_qty,
                     timestamp: new_ask_order.timestamp,
+                    taker_side: new_ask_order.side,
+                    trade_id: current_trade_id,
                 });
 
                 if best_bid_order.qty == 0 {
                     let removed_order = bid_queue.pop_front().unwrap();
-                    self.order_locations.remove(&removed_order.id);
+                    self.order_locations.remove(&removed_order.client_id);
                 }
 
                 if bid_queue.is_empty() {
@@ -176,7 +197,7 @@ impl OrderBook {
                 self.add_order_to_asks(new_ask_order, events)
             } else if new_ask_order.order_type == OrderType::Market {
                 events.push(MatchEvent::OrderKilled {
-                    id: new_ask_order.id,
+                    client_id: new_ask_order.client_id,
                     killed_qty: new_ask_order.qty,
                 })
             }
@@ -185,15 +206,13 @@ impl OrderBook {
 
     pub fn add_order_to_bids(&mut self, new_bid_order: OrderEntry, events: &mut Vec<MatchEvent>) {
         self.order_locations
-            .insert(new_bid_order.id, (new_bid_order.price, Side::Bid));
+            .insert(new_bid_order.client_id, (new_bid_order.price, Side::Bid));
 
         events.push(MatchEvent::OrderPlaced {
-            id: new_bid_order.id,
+            client_id: new_bid_order.client_id,
             price: new_bid_order.price,
             qty: new_bid_order.qty,
-            side:  new_bid_order.side,
-
-
+            side: new_bid_order.side,
         });
         self.bids
             .entry(new_bid_order.price) // 1. Locate the specific price level in the bid side of the book
@@ -203,10 +222,10 @@ impl OrderBook {
 
     pub fn add_order_to_asks(&mut self, new_ask_order: OrderEntry, events: &mut Vec<MatchEvent>) {
         self.order_locations
-            .insert(new_ask_order.id, (new_ask_order.price, Side::Ask));
+            .insert(new_ask_order.client_id, (new_ask_order.price, Side::Ask));
 
         events.push(MatchEvent::OrderPlaced {
-            id: new_ask_order.id,
+            client_id: new_ask_order.client_id,
             price: new_ask_order.price,
             qty: new_ask_order.qty,
             side: new_ask_order.side,
@@ -220,9 +239,10 @@ impl OrderBook {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     /// Helper function to construct Orders
     fn new_order(
-        id: u64,
+        client_id: u64,
         price: u64,
         qty: u64,
         side: Side,
@@ -230,7 +250,7 @@ mod tests {
         timestamp: i64,
     ) -> OrderEntry {
         OrderEntry {
-            id,
+            client_id,
             price,
             qty,
             side,
@@ -241,13 +261,14 @@ mod tests {
 
     #[test]
     fn test_limit_order_matching() {
-        // 1. Initialize OrderBook (Use new(), don't construct manually)
-        let mut ob = OrderBook::new();
+        // 1. Initialize OrderBook
+        let mut ob = OrderBook::new(0, 0);
+        let mut events = Vec::new(); // Initialize the events buffer
 
         // 2. Scenario: User A places a Sell order (Maker)
         // Ask @ 100, Qty 10
         let ask_order = new_order(1, 100, 10, Side::Ask, OrderType::Limit, 1000);
-        ob.add_order(ask_order);
+        ob.add_order(ask_order, &mut events);
 
         // Check: Order should be in Asks BTreeMap at price 100
         assert!(ob.asks.contains_key(&100));
@@ -257,7 +278,7 @@ mod tests {
         // 3. Scenario: User B tries to Buy (Taker), but price is too low
         // Bid @ 99, Qty 5
         let bid_cheap = new_order(2, 99, 5, Side::Bid, OrderType::Limit, 2000);
-        ob.add_order(bid_cheap);
+        ob.add_order(bid_cheap, &mut events);
 
         // Check: No match. Bid enters Bids BTreeMap at price 99.
         assert!(ob.bids.contains_key(&99));
@@ -265,8 +286,9 @@ mod tests {
 
         // 4. Scenario: User C places a Buy order (Taker) with matching price
         // Bid @ 100, Qty 3
+        events.clear(); // Clear previous placement events to isolate the match
         let bid_match = new_order(3, 100, 3, Side::Bid, OrderType::Limit, 3000);
-        let events = ob.add_order(bid_match);
+        ob.add_order(bid_match, &mut events);
 
         // Check: Immediate match!
         // 1. User C (Bid) is fully filled, so it should NOT be in Bids book.
@@ -285,45 +307,65 @@ mod tests {
 
     #[test]
     fn test_fifo_ordering() {
-        let mut ob = OrderBook::new();
+        let mut ob = OrderBook::new(0, 0);
+        let mut events = Vec::new();
 
         // User A places Bid @ 100 (First)
-        ob.add_order(new_order(1, 100, 10, Side::Bid, OrderType::Limit, 1000));
+        ob.add_order(
+            new_order(1, 100, 10, Side::Bid, OrderType::Limit, 1000),
+            &mut events,
+        );
 
         // User B places Bid @ 100 (Later)
-        ob.add_order(new_order(2, 100, 10, Side::Bid, OrderType::Limit, 2000));
+        ob.add_order(
+            new_order(2, 100, 10, Side::Bid, OrderType::Limit, 2000),
+            &mut events,
+        );
 
         // Layout in BTreeMap: Key 100 -> VecDeque [Order(1), Order(2)]
         // Verification:
         let queue = ob.bids.get(&100).unwrap();
         assert_eq!(queue.len(), 2);
-        assert_eq!(queue[0].id, 1); // Front is User A
-        assert_eq!(queue[1].id, 2); // Back is User B
+        assert_eq!(queue[0].client_id, 1); // Front is User A
+        assert_eq!(queue[1].client_id, 2); // Back is User B
 
         // Match Logic: Sell order @ 100, Qty 10
         // Should consume User A (Front) completely.
-        ob.add_order(new_order(3, 100, 10, Side::Ask, OrderType::Limit, 3000));
+        ob.add_order(
+            new_order(3, 100, 10, Side::Ask, OrderType::Limit, 3000),
+            &mut events,
+        );
 
         // The remaining order in the book should be User B (ID 2).
         let queue_after = ob.bids.get(&100).unwrap();
         assert_eq!(queue_after.len(), 1);
-        assert_eq!(queue_after[0].id, 2); // User B is now at the front
+        assert_eq!(queue_after[0].client_id, 2); // User B is now at the front
     }
 
     #[test]
     fn test_asks_fifo_ordering() {
-        let mut ob = OrderBook::new();
+        let mut ob = OrderBook::new(0, 0);
+        let mut events = Vec::new();
 
         // Seller A places Ask @ 100 (First)
-        ob.add_order(new_order(1, 100, 10, Side::Ask, OrderType::Limit, 1000));
+        ob.add_order(
+            new_order(1, 100, 10, Side::Ask, OrderType::Limit, 1000),
+            &mut events,
+        );
 
         // Seller B places Ask @ 100 (Later)
-        ob.add_order(new_order(2, 100, 10, Side::Ask, OrderType::Limit, 2000));
+        ob.add_order(
+            new_order(2, 100, 10, Side::Ask, OrderType::Limit, 2000),
+            &mut events,
+        );
 
         // Layout: Key 100 -> VecDeque [Order(1), Order(2)]
 
         // Buyer C comes to buy 10 @ 100
-        ob.add_order(new_order(3, 100, 10, Side::Bid, OrderType::Limit, 3000));
+        ob.add_order(
+            new_order(3, 100, 10, Side::Bid, OrderType::Limit, 3000),
+            &mut events,
+        );
 
         // Assertions:
         // One Ask should remain.
@@ -331,24 +373,34 @@ mod tests {
 
         // The remaining Ask MUST be User B (ID: 2).
         // User A (ID: 1) was at front and got popped.
-        assert_eq!(ob.asks.get(&100).unwrap()[0].id, 2);
+        assert_eq!(ob.asks.get(&100).unwrap()[0].client_id, 2);
 
         println!("✅ Test Passed: Asks FIFO is Correct!");
     }
 
     #[test]
     fn test_market_bid_order_ioc() {
-        let mut ob = OrderBook::new();
+        let mut ob = OrderBook::new(0, 0);
+        let mut events = Vec::new();
 
         // 1. Setup Liquidity (Asks)
         // Seller A: Limit Sell @ 100, Qty 10
-        ob.add_order(new_order(1, 100, 10, Side::Ask, OrderType::Limit, 1000));
+        ob.add_order(
+            new_order(1, 100, 10, Side::Ask, OrderType::Limit, 1000),
+            &mut events,
+        );
         // Seller B: Limit Sell @ 102, Qty 20
-        ob.add_order(new_order(2, 102, 20, Side::Ask, OrderType::Limit, 2000));
+        ob.add_order(
+            new_order(2, 102, 20, Side::Ask, OrderType::Limit, 2000),
+            &mut events,
+        );
 
         // 2. Market Buy comes in (Qty 15)
         // Logic: Consumes 10 @ 100, then 5 @ 102.
-        ob.add_order(new_order(3, 0, 15, Side::Bid, OrderType::Market, 3000));
+        ob.add_order(
+            new_order(3, 0, 15, Side::Bid, OrderType::Market, 3000),
+            &mut events,
+        );
 
         // Check: The $100 price level should be gone (Empty queue removes the key).
         assert!(!ob.asks.contains_key(&100));
@@ -360,7 +412,10 @@ mod tests {
 
         // 3. Huge Market Buy (Qty 1000)
         // Logic: Consumes remaining 15 @ 102. The rest (985) is Killed (IOC).
-        ob.add_order(new_order(4, 0, 1000, Side::Bid, OrderType::Market, 4000));
+        ob.add_order(
+            new_order(4, 0, 1000, Side::Bid, OrderType::Market, 4000),
+            &mut events,
+        );
 
         // Check: Asks should be completely empty.
         assert!(ob.asks.is_empty());
@@ -372,17 +427,27 @@ mod tests {
 
     #[test]
     fn test_market_ask_order_ioc() {
-        let mut ob = OrderBook::new();
+        let mut ob = OrderBook::new(0, 0);
+        let mut events = Vec::new();
 
         // 1. Setup Liquidity (Bids)
         // Buyer A: Limit Buy @ 98, Qty 20
-        ob.add_order(new_order(1, 98, 20, Side::Bid, OrderType::Limit, 1000));
+        ob.add_order(
+            new_order(1, 98, 20, Side::Bid, OrderType::Limit, 1000),
+            &mut events,
+        );
         // Buyer B: Limit Buy @ 100, Qty 10
-        ob.add_order(new_order(2, 100, 10, Side::Bid, OrderType::Limit, 2000));
+        ob.add_order(
+            new_order(2, 100, 10, Side::Bid, OrderType::Limit, 2000),
+            &mut events,
+        );
 
         // 2. Market Sell comes in (Qty 15)
         // Logic: Hits Best Bid ($100) first (eats 10), then ($98) (eats 5).
-        ob.add_order(new_order(3, 0, 15, Side::Ask, OrderType::Market, 3000));
+        ob.add_order(
+            new_order(3, 0, 15, Side::Ask, OrderType::Market, 3000),
+            &mut events,
+        );
 
         // Check: The $100 Bid should be gone.
         assert!(!ob.bids.contains_key(&100));
@@ -393,7 +458,10 @@ mod tests {
         assert_eq!(queue_98[0].qty, 15);
 
         // 3. Huge Market Sell (Qty 1000)
-        ob.add_order(new_order(4, 0, 1000, Side::Ask, OrderType::Market, 4000));
+        ob.add_order(
+            new_order(4, 0, 1000, Side::Ask, OrderType::Market, 4000),
+            &mut events,
+        );
 
         // Check: Empty.
         assert!(ob.bids.is_empty());

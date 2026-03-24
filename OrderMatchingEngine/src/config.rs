@@ -7,6 +7,8 @@ pub struct AppConfig {
     pub events_topic: String,
     pub group_id: String,
     pub concurrency: usize,
+    pub use_historical_data: bool,
+    pub historical_orders_grpc_addr: String,
 }
 
 impl AppConfig {
@@ -20,6 +22,12 @@ impl AppConfig {
                 .unwrap_or_else(|_| "1".into())
                 .parse()
                 .unwrap_or(1),
+            use_historical_data: env::var("HISTORICAL_ORDERS_GRPC")
+                .unwrap_or_else(|_| "FALSE".into())
+                .parse()
+                .unwrap_or(false),
+            historical_orders_grpc_addr: env::var("HISTORICAL_ORDERS_GRPC_ADDR")
+                .unwrap_or_else(|_| "default".into()),
         }
     }
 }
