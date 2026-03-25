@@ -1,5 +1,4 @@
 use crate::config::AppConfig;
-// use crate::infrastructure::redpanda_gateway::{RedpandaConsumer, RedpandaProducer};
 use crate::infrastructure::grpc_gateway::GrpcGateway;
 use crate::infrastructure::redpanda_gateway::{RedpandaConsumer, RedpandaProducer};
 use crate::models::events::MatchEvent;
@@ -31,15 +30,16 @@ async fn main() {
     let cfg = AppConfig::from_env();
     let tps_counter = Arc::new(AtomicU64::new(0));
 
-    let (inbound_tx, inbound_rx) = mpsc::channel::<EngineAction>(10000);
-    let (outbound_tx, outbound_rx) = mpsc::channel::<MatchEvent>(10000);
+    // main.rs
+    let (inbound_tx, inbound_rx) = mpsc::channel::<Vec<EngineAction>>(128); // 夠晒數
+    let (outbound_tx, outbound_rx) = mpsc::channel::<MatchEvent>(1_000_000); // 畀多啲空間緩衝
 
     // 1. Initialize handles as Options or empty vectors outside the if blocks
     let mut consumer_tasks = Vec::new();
     let mut producer_handle = None;
 
-    let use_redpanda_consumer = true; // Set your flags
-    let use_redpanda_producer = true;
+    let use_redpanda_consumer = false;
+    let use_redpanda_producer = false;
 
     // Setting up kafka consumer
     if use_redpanda_consumer {
@@ -67,6 +67,7 @@ async fn main() {
     }
 
     // gRPC setup...
+    eprintln!("{}", cfg.use_historical_data);
     if cfg.use_historical_data {
         let grpc_gateway = GrpcGateway::new(inbound_tx.clone());
         let service = MatchingEngineServer::new(grpc_gateway);

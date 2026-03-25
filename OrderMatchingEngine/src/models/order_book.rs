@@ -41,8 +41,7 @@ impl OrderBook {
         engine_id
     }
 
-    pub fn cancel_order(&mut self, order_id: u64) {
-        let mut events = Vec::new();
+    pub fn cancel_order(&mut self, order_id: u64, events: &mut Vec<MatchEvent>) {
         let (price, side) = match self.order_locations.remove(&order_id) {
             Some(loc) => loc,
             None => {
@@ -93,7 +92,7 @@ impl OrderBook {
                 order.client_id = self.next_engine_id();
                 self.add_order(order, events_buffer)
             }
-            EngineAction::Cancel(cancel) => self.cancel_order(cancel.client_id),
+            EngineAction::Cancel(cancel) => self.cancel_order(cancel.client_id, events_buffer),
         }
     }
 

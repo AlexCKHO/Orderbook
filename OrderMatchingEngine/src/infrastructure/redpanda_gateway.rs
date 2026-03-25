@@ -14,7 +14,7 @@ pub struct RedpandaConsumer {
     brokers: String,
     group_id: String,
     topic: String,
-    inbound_tx: mpsc::Sender<EngineAction>,
+    inbound_tx: mpsc::Sender<Vec<EngineAction>>,
 }
 
 impl RedpandaConsumer {
@@ -22,7 +22,7 @@ impl RedpandaConsumer {
         brokers: &str,
         group_id: &str,
         topic: &str,
-        inbound_tx: mpsc::Sender<EngineAction>,
+        inbound_tx: mpsc::Sender<Vec<EngineAction>>,
     ) -> Self {
         Self {
             brokers: brokers.to_string(),
@@ -81,9 +81,11 @@ impl RedpandaConsumer {
                                     if let Ok(engine_action) =
                                         EngineAction::try_from(engine_command)
                                     {
-                                        if let Err(e) = inbound_tx.send(engine_action).await {
-                                            eprint!("Channel Closed {}", e)
-                                        }
+
+                                        // todo!
+                                        // if let Err(e) = inbound_tx.send(engine_action).await {
+                                        //     eprint!("Channel Closed {}", e)
+                                        // }
                                     }
                                 }
                             }

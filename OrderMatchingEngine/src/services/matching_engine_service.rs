@@ -18,23 +18,33 @@ impl MatchingEngineService {
 
     pub async fn run_matching_actor(
         mut self,
-        mut inbound_rx: mpsc::Receiver<EngineAction>,
+        // 1. ✅ Change the receiver type to accept the full Batch (Vec)
+        mut inbound_rx: mpsc::Receiver<Vec<EngineAction>>,
         counter: Arc<AtomicU64>,
     ) {
         let mut order_book = OrderBook::new(0, 0);
-        let mut reusable_events_buffer: Vec<MatchEvent> = Vec::with_capacity(1024);
 
-        while let Some(cmd) = inbound_rx.recv().await {
-            order_book.process_single(cmd, &mut reusable_events_buffer);
+        // Increase capacity a bit since we are handling 5000+ orders at a time
+        let mut reusable_events_buffer: Vec<MatchEvent> = Vec::with_capacity(8192);
 
-            for vec_of_events in reusable_events_buffer.iter() {
-                if let Err(e) = self.outbound_tx.send(vec_of_events.clone()).await {
+        // `cmd_batch` is now a Vec<EngineAction>
+        while let Some(cmd_batch) = inbound_rx.recv().await {
+            let batch_size = cmd_batch.len() as u64;
+
+            // 2. ✅ Unleash the CPU: Process the entire vector synchronously
+            order_book.process_batch(cmd_batch, &mut reusable_events_buffer);
+
+            // 3. Send the generated events to Redpanda/Kafka
+            for event in reusable_events_buffer.iter() {
+                if let Err(e) = self.outbound_tx.send(event.clone()).await {
                     eprintln!("Critical Error: Outbound channel closed: {}", e);
                     break;
                 }
             }
+            reusable_events_buffer.clear();
 
-            counter.fetch_add(1, Ordering::Relaxed);
+            // 4. ✅ Add the whole batch size to the TPS counter at once!
+            counter.fetch_add(batch_size, Ordering::Relaxed);
         }
     }
 }

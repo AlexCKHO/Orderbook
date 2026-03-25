@@ -22,8 +22,8 @@ impl AppConfig {
                 .unwrap_or_else(|_| "1".into())
                 .parse()
                 .unwrap_or(1),
-            use_historical_data: env::var("HISTORICAL_ORDERS_GRPC")
-                .unwrap_or_else(|_| "FALSE".into())
+            use_historical_data: env::var("USE_HISTORICAL_DATA")
+                .unwrap_or_else(|_| "false".into())
                 .parse()
                 .unwrap_or(false),
             historical_orders_grpc_addr: env::var("HISTORICAL_ORDERS_GRPC_ADDR")
