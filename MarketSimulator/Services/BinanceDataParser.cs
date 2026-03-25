@@ -8,7 +8,7 @@ public class BinanceDataParser
 {
     private readonly Dictionary<ulong, ulong> _activeBids = new();
     private readonly Dictionary<ulong, ulong> _activeAsks = new();
-    private ulong _currentOrderId = 1_000_000;
+    private ulong _currentOrderId = 10_000_00;
     
     public int CorruptedLinesCount { get; private set; } = 0;
 
@@ -61,7 +61,7 @@ public class BinanceDataParser
                 {
                     PlaceOrder = new OrderRequest
                     {
-                        Id = _currentOrderId++,
+                        ClientId = _currentOrderId++,
                         Price = price,
                         Qty = qty,
                         Side = side,
@@ -84,7 +84,7 @@ public class BinanceDataParser
 
             if (activeDict.Remove(price, out ulong oldOrderId))
             {
-                yield return new EngineCommand { CancelOrder = new CancelRequest { Id = oldOrderId } };
+                yield return new EngineCommand { CancelOrder = new CancelRequest { ClientId = oldOrderId } };
             }
 
             if (qty > 0)
@@ -96,7 +96,7 @@ public class BinanceDataParser
                 {
                     PlaceOrder = new OrderRequest
                     {
-                        Id = newOrderId,
+                        ClientId = newOrderId,
                         Price = price,
                         Qty = qty,
                         Side = side,
