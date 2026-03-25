@@ -35,12 +35,12 @@ impl MatchingEngineService {
             order_book.process_batch(cmd_batch, &mut reusable_events_buffer);
 
             // 3. Send the generated events to Redpanda/Kafka
-            for event in reusable_events_buffer.iter() {
-                if let Err(e) = self.outbound_tx.send(event.clone()).await {
-                    eprintln!("Critical Error: Outbound channel closed: {}", e);
-                    break;
-                }
-            }
+            // for event in reusable_events_buffer.iter() {
+            //     if let Err(e) = self.outbound_tx.send(event.clone()).await {
+            //         eprintln!("Critical Error: Outbound channel closed: {}", e);
+            //         break;
+            //     }
+            // }
             reusable_events_buffer.clear();
 
             // 4. ✅ Add the whole batch size to the TPS counter at once!

@@ -21,10 +21,7 @@ impl TryFrom<OrderRequest> for EngineAction {
             _ => return Err(MapperError("Invalid Order Type".into())),
         };
 
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos() as i64;
+        let timestamp = req.timestamp;
 
         Ok(EngineAction::Create(OrderEntry {
             client_id: req.client_id,

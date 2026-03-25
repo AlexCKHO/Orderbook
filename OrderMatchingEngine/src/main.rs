@@ -67,10 +67,13 @@ async fn main() {
     }
 
     // gRPC setup...
-    eprintln!("{}", cfg.use_historical_data);
+
     if cfg.use_historical_data {
         let grpc_gateway = GrpcGateway::new(inbound_tx.clone());
-        let service = MatchingEngineServer::new(grpc_gateway);
+        let service = MatchingEngineServer::new(grpc_gateway)
+            .max_decoding_message_size(32 * 1024 * 1024)
+            .max_encoding_message_size(32 * 1024 * 1024);
+
         let addr = cfg
             .historical_orders_grpc_addr
             .parse()
@@ -85,22 +88,6 @@ async fn main() {
     let engine_counter = Arc::clone(&tps_counter);
     let engine_handle = tokio::spawn(async move {
         service.run_matching_actor(inbound_rx, engine_counter).await;
-    });
-
-    // TPS Ticker
-    let ticker_counter = Arc::clone(&tps_counter);
-    tokio::spawn(async move {
-        let mut ticker = interval(Duration::from_secs(1));
-        let mut last_count = 0;
-        loop {
-            ticker.tick().await;
-            let current_count = ticker_counter.load(Ordering::Relaxed);
-            let tps = current_count - last_count;
-            if tps > 0 {
-                println!("🚀 Current TPS: {}", tps);
-            }
-            last_count = current_count;
-        }
     });
 
     // 2. Use futures::future::OptionFuture and handle the Vec of consumers

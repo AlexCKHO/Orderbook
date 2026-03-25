@@ -28,43 +28,60 @@ impl MatchingEngine for GrpcGateway {
         request: Request<Streaming<EngineBatchCommand>>,
     ) -> Result<Response<Self::PlaceBatchStreamStream>, Status> {
         let mut in_stream = request.into_inner();
-        let tx = self.inbound_tx.clone(); // 注意：呢度 tx 要轉做傳送 Vec<EngineAction>
+        let tx = self.inbound_tx.clone();
         let (resp_tx, resp_rx) = mpsc::channel(100);
 
         tokio::spawn(async move {
-            while let Ok(Some(engine_batch_command)) = in_stream.message().await {
-                let capacity = engine_batch_command.commands.len();
-                let mut batch = Vec::with_capacity(capacity); // ✅ 預先分配 RAM
+            println!("🔍 [DEBUG] Worker task started, waiting for first message...");
 
-                for command in engine_batch_command.commands {
-                    if let Ok(action) = EngineAction::try_from(command) {
-                        batch.push(action); // ✅ 儲埋一齊，唔好 await 住
-                    } else {
-                        eprintln!("⚠️ [WARNING] Failed to parse EngineCommand");
+            loop {
+                match in_stream.message().await {
+                    Ok(Some(engine_batch_command)) => {
+                        let capacity = engine_batch_command.commands.len();
+                        println!("📦 [DEBUG] Received batch! Size: {}", capacity);
+
+                        let mut batch = Vec::with_capacity(capacity);
+
+                        for (idx, command) in engine_batch_command.commands.into_iter().enumerate()
+                        {
+                            match EngineAction::try_from(command) {
+                                Ok(action) => batch.push(action),
+                                Err(e) => {
+                                    eprintln!("⚠️ [PARSE ERROR] Batch index {}: ", idx);
+                                }
+                            }
+                        }
+
+                        let count = batch.len();
+                        if count > 0 {
+                            if tx.send(batch).await.is_err() {
+                                eprintln!("🔥 [CRITICAL] Matching Engine channel closed!");
+                                break;
+                            }
+                        }
+
+                        let reply = OrderBatchResponse {
+                            success: true,
+                            message: "Orders queued".into(),
+                            queued_count: count as u64,
+                        };
+                        let _ = resp_tx.send(Ok(reply)).await;
                     }
-                }
-
-                let count = batch.len();
-
-                if count > 0 {
-                    // ✅ 整個 Batch 只做 1 次 send (1 次 Context Switch)
-                    if tx.send(batch).await.is_err() {
-                        eprintln!("🔥 [CRITICAL] Matching Engine channel closed!");
-                        let _ = resp_tx.send(Err(Status::internal("Engine offline"))).await;
+                    Ok(None) => {
+                        println!("ℹ️ [DEBUG] Stream closed by client (Normal exit).");
+                        break;
+                    }
+                    Err(status) => {
+                        eprintln!(
+                            "❌ [GRPC ERROR] Stream broken: CODE: {:?}, MSG: {}",
+                            status.code(),
+                            status.message()
+                        );
                         break;
                     }
                 }
-
-                let reply = OrderBatchResponse {
-                    success: true,
-                    message: "Orders queued".into(),
-                    queued_count: count as u64,
-                };
-
-                if resp_tx.send(Ok(reply)).await.is_err() {
-                    break;
-                }
             }
+            println!("🔍 [DEBUG] Worker task exited.");
         });
 
         Ok(Response::new(Box::pin(ReceiverStream::new(resp_rx))))
