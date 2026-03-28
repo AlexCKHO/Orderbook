@@ -1,27 +1,32 @@
 ﻿using System.Collections.Concurrent;
 using System.Diagnostics;
-using Confluent.Kafka;
 using Google.Protobuf;
 using Grpc.Core;
 using Grpc.Net.Client;
+using MarketSimulator.Models;
 using MarketSimulator.Services;
-using Orderbook;
 using Microsoft.Extensions.Configuration;
+using Orderbook;
 
 namespace MarketSimulator;
 
 class Program
 {
-    private const int NoOfOrderToTest = 13_000_000;
-    private const int Repeat = 4;
-    private const string Address = "http://127.0.0.1:50051";
-    private const int Concurrency = 4;
-    private const int BatchSize = 5000;
-    private const bool UseHistorical = true;
-
     static async Task Main(string[] args)
     {
-        Console.WriteLine($"⚡ [SETUP] Configuring gRPC Client...");
+        Console.WriteLine("⚡ [SETUP] Configuring gRPC Client...");
+
+        var configuration = new ConfigurationBuilder()
+            .SetBasePath(Directory.GetCurrentDirectory())
+            .AddJsonFile("appsettings.json", optional: true, reloadOnChange: true)
+            .AddJsonFile("appsettings.local.json", optional: true, reloadOnChange: true)
+            .AddEnvironmentVariables()
+            .Build();
+
+        var settings = configuration
+                           .GetSection("MarketSimulatorSettings")
+                           .Get<MarketSimulatorSettings>()
+                       ?? throw new InvalidOperationException("MarketSimulatorSettings section is missing.");
 
         var handler = new SocketsHttpHandler
         {
@@ -31,131 +36,159 @@ class Program
             EnableMultipleHttp2Connections = true
         };
 
-        using var channel = GrpcChannel.ForAddress(Address, new GrpcChannelOptions
+        using var channel = GrpcChannel.ForAddress(settings.gRPCAddress, new GrpcChannelOptions
         {
             HttpHandler = handler,
-            // Bumped to 32MB to be absolutely safe with real-world Binance string allocations
             MaxReceiveMessageSize = 32 * 1024 * 1024,
             MaxSendMessageSize = 32 * 1024 * 1024
         });
 
         var client = new MatchingEngine.MatchingEngineClient(channel);
 
-        var config = new ConfigurationBuilder()
-            .AddJsonFile("appsettings.local.json")
-            .Build();
+        Console.WriteLine("⚡ [SETUP] Setting up Binance trade data...");
 
-        Console.WriteLine($"⚡ [SETUP] Setting up Binance trade Data");
-
-        var binPath = config["DataSettings:BinanceBinaryDataPath"];
-        var jsonPath = config["DataSettings:BinanceJsonDataPath"];
+        var binPath = configuration["DataSettings:BinanceBinaryDataPath"];
+        var jsonPath = configuration["DataSettings:BinanceJsonDataPath"];
         var engineCommands = new List<EngineCommand>();
 
-
-        if (UseHistorical)
+        if (settings.UseHistorical)
         {
             try
             {
-                if (File.Exists(binPath))
+                if (!string.IsNullOrWhiteSpace(binPath) && File.Exists(binPath))
                 {
                     using var input = File.OpenRead(binPath);
-                    while (input.Position < input.Length
-                           && engineCommands.Count < NoOfOrderToTest
-                          )
+
+                    while (input.Position < input.Length && engineCommands.Count < settings.NoOfOrderToTest)
                     {
                         var command = EngineCommand.Parser.ParseDelimitedFrom(input);
-                        if (command != null) engineCommands.Add(command);
+                        if (command != null)
+                            engineCommands.Add(command);
                     }
 
-                    Console.WriteLine($"Binary file exists, engineCommands count: {engineCommands.Count}");
+                    Console.WriteLine($"✅ Binary file exists, engineCommands count: {engineCommands.Count:N0}");
                 }
             }
             catch (InvalidProtocolBufferException ex)
             {
-                Console.WriteLine($"Binary data is corrupted: {ex.Message}");
+                Console.WriteLine($"❌ Binary data is corrupted: {ex.Message}");
             }
             catch (IOException ex)
             {
-                Console.WriteLine($"Binary read failed, falling back to JSON: {ex.Message}");
+                Console.WriteLine($"❌ Binary read failed, falling back to JSON: {ex.Message}");
             }
         }
         else
         {
-            for (int i = 0; i < NoOfOrderToTest; i++)
+            for (int i = 0; i < settings.NoOfOrderToTest; i++)
             {
-                // Use Random.Shared for both to ensure thread-safety and proper seeding
                 if (Random.Shared.Next(0, 2) == 0)
                 {
                     engineCommands.Add(GenerateRandomOrderRequest(i));
                 }
                 else
                 {
-                    // Use Random.Shared here as well
-                    int cancelId = Random.Shared.Next(1000000, 1000000 + i);
+                    int cancelId = Random.Shared.Next(1_000_000, 1_000_000 + i);
                     engineCommands.Add(GenerateRandomCancelRequest(cancelId));
                 }
             }
         }
 
-        if (engineCommands.Count == 0 && File.Exists(jsonPath))
+        if (engineCommands.Count == 0 && !string.IsNullOrWhiteSpace(jsonPath) && File.Exists(jsonPath))
         {
-            Console.WriteLine($"Binary file does not exist, parsing json file");
+            Console.WriteLine("⚡ Binary file does not exist, parsing JSON file...");
             try
             {
                 var parser = new BinanceDataParser();
-                engineCommands = parser.ParseLines(File.ReadLines(jsonPath)).ToList();
+                engineCommands = parser.ParseLines(File.ReadLines(jsonPath))
+                    .Take(settings.NoOfOrderToTest)
+                    .ToList();
 
-                using var output = File.Create(binPath);
-                foreach (var command in engineCommands)
+                if (!string.IsNullOrWhiteSpace(binPath))
                 {
-                    command.WriteDelimitedTo(output);
+                    using var output = File.Create(binPath);
+                    foreach (var command in engineCommands)
+                    {
+                        command.WriteDelimitedTo(output);
+                    }
                 }
+
+                Console.WriteLine($"✅ Parsed JSON successfully, engineCommands count: {engineCommands.Count:N0}");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Critical error processing JSON/Binary: {ex.Message}");
+                Console.WriteLine($"❌ Critical error processing JSON/Binary: {ex.Message}");
+                return;
             }
         }
 
-        Console.WriteLine($"✅ Loaded {engineCommands.Count:N0} commands into RAM ready for benchmark.");
-        Console.WriteLine("\n💀 Select benchmark mode:");
+        if (engineCommands.Count == 0)
+        {
+            Console.WriteLine("❌ No commands loaded. Exiting.");
+            return;
+        }
+
+        var commands = engineCommands.ToArray();
+
+        Console.WriteLine($"✅ Loaded {commands.Length:N0} commands into RAM ready for benchmark.");
+        Console.WriteLine();
+        Console.WriteLine("💀 Select benchmark mode:");
         Console.WriteLine("1. HFT Streaming (Sequential unbatched over single gRPC stream)");
-        Console.WriteLine("2. Batching (Multiplexed concurrent gRPC streams)");
+        Console.WriteLine("2. Batching");
         Console.Write("Selection [1 or 2]: ");
+
         var choice = Console.ReadLine();
 
         GC.Collect();
         GC.WaitForPendingFinalizers();
-        
-        for (int i = 0; i < Repeat; i++)
+
+        for (int i = 0; i < settings.TestRepeat; i++)
         {
+            Console.WriteLine($"\n================ RUN {i + 1}/{settings.TestRepeat} ================\n");
+
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+
             if (choice == "1")
             {
-                GC.Collect();
-                await SendOrderSequentially(client, engineCommands.ToArray());
+                await SendOrderIndividually(client, commands, settings);
             }
             else
             {
-                GC.Collect();
-                await SendOrdersByBatch(client, engineCommands.ToArray(), BatchSize);
+                await SendOrdersByBatch(client, commands, settings);
             }
         }
     }
 
-    private static async Task SendOrderSequentially(MatchingEngine.MatchingEngineClient client,
-        EngineCommand[] commands)
+    private static async Task SendOrderIndividually(
+        MatchingEngine.MatchingEngineClient client,
+        EngineCommand[] commands,
+        MarketSimulatorSettings settings)
     {
-        Console.WriteLine($"🚀 Launching Sequential Market Replay over gRPC...");
+        Console.WriteLine("🚀 Launching Sequential Market Replay over gRPC...");
+
+        bool useHistoricalPacing = settings.UseHistorical && settings.EnableHistoricalPacing;
+        HistoricalOrderPacer? historicalPacer = useHistoricalPacing
+            ? new HistoricalOrderPacer(settings.ReplaySpeed)
+            : null;
+
+        RandomOrderRatePacer? randomPacer =
+            !settings.UseHistorical && settings.EnableRandomOrderPacing && settings.RandomOrderPerSecond > 0
+                ? new RandomOrderRatePacer(settings.RandomOrderPerSecond)
+                : null;
+
+        if (useHistoricalPacing)
+            Console.WriteLine($"⏱ Historical pacing enabled at x{settings.ReplaySpeed:0.###}");
+
+        if (!settings.UseHistorical && randomPacer != null)
+            Console.WriteLine($"⏱ Random pacing enabled at {settings.RandomOrderPerSecond:N0} orders/sec");
 
         var sw = Stopwatch.StartNew();
         long successCount = 0;
 
         using var call = client.PlaceBatchStream();
 
-        // Queue to track timestamps (FIFO - First-In-First-Out)
         var timestamps = new ConcurrentQueue<long>();
-
-        // Pre-allocate the list to avoid ANY memory resizing during the benchmark
         var latencies = new List<double>(commands.Length);
 
         var readTask = Task.Run(async () =>
@@ -164,18 +197,17 @@ class Program
             {
                 await foreach (var response in call.ResponseStream.ReadAllAsync())
                 {
-                    if (response.Success)
-                    {
-                        // Match the response to the oldest unacknowledged request
-                        if (timestamps.TryDequeue(out long startTicks))
-                        {
-                            double elapsedMs = (Stopwatch.GetTimestamp() - startTicks) * 1000.0 / Stopwatch.Frequency;
-                            latencies.Add(
-                                elapsedMs); // Safe to use standard List here because only ONE thread is reading
-                        }
+                    if (!response.Success)
+                        continue;
 
-                        Interlocked.Add(ref successCount, (long)response.QueuedCount);
+                    if (timestamps.TryDequeue(out long startTicks))
+                    {
+                        double elapsedMs =
+                            (Stopwatch.GetTimestamp() - startTicks) * 1000.0 / Stopwatch.Frequency;
+                        latencies.Add(elapsedMs);
                     }
+
+                    Interlocked.Add(ref successCount, (long)response.QueuedCount);
                 }
             }
             catch (RpcException ex)
@@ -188,10 +220,19 @@ class Program
         {
             foreach (var command in commands)
             {
+                if (historicalPacer != null)
+                {
+                    long? historicalTs = TryGetHistoricalTimestampMs(command);
+                    await historicalPacer.WaitAsync(historicalTs);
+                }
+                else if (randomPacer != null)
+                {
+                    await randomPacer.WaitAsync(1);
+                }
+
                 var batch = new EngineBatchCommand();
                 batch.Commands.Add(command);
 
-                // Record the exact tick before pushing to the network
                 timestamps.Enqueue(Stopwatch.GetTimestamp());
                 await call.RequestStream.WriteAsync(batch);
             }
@@ -206,57 +247,54 @@ class Program
         await readTask;
         sw.Stop();
 
-        // Calculate Percentiles
-        var sorted = latencies.ToArray();
-        Array.Sort(sorted);
-
-        double p0 = sorted.Length > 0 ? sorted[0] : 0; // Min
-        double p50 = sorted.Length > 0 ? sorted[(int)(sorted.Length * 0.50)] : 0; // Median
-        double p99 = sorted.Length > 0 ? sorted[(int)(sorted.Length * 0.99)] : 0;
-        double p999 = sorted.Length > 0 ? sorted[(int)(sorted.Length * 0.999)] : 0;
-        double p100 = sorted.Length > 0 ? sorted[^1] : 0; // Max
-
-        Console.WriteLine($"\n========================================");
-        Console.WriteLine($"🏁 SEQUENTIAL REPLAY RESULT");
-        Console.WriteLine($"========================================");
-        Console.WriteLine($"⚡ TPS: {successCount / sw.Elapsed.TotalSeconds:N0} messages/sec");
-        Console.WriteLine($"✅ Delivered via gRPC: {successCount:N0}");
-        Console.WriteLine($"========================================");
-        Console.WriteLine($"⏱️ Latency Min (p0):   {p0:F3} ms");
-        Console.WriteLine($"⏱️ Latency Median(p50):{p50:F3} ms");
-        Console.WriteLine($"⏱️ Latency p99:        {p99:F3} ms");
-        Console.WriteLine($"⏱️ Latency p99.9:      {p999:F3} ms");
-        Console.WriteLine($"⏱️ Latency Max (p100): {p100:F3} ms");
-        Console.WriteLine($"========================================");
+        PrintResults("SEQUENTIAL REPLAY RESULT", successCount, sw, latencies);
     }
 
-    private static async Task SendOrdersByBatch(MatchingEngine.MatchingEngineClient client, EngineCommand[] commands,
-        int batchSize = 5_000)
+    private static async Task SendOrdersByBatch(
+        MatchingEngine.MatchingEngineClient client,
+        EngineCommand[] commands,
+        MarketSimulatorSettings settings)
     {
-        Console.WriteLine($"\n🚀 [BENCHMARK] Starting Batching (Size: {batchSize}, Streams: {Concurrency})...");
+        bool useHistoricalBatchPacing = settings.UseHistorical && settings.EnableHistoricalPacing;
+
+        if (useHistoricalBatchPacing)
+        {
+            await SendOrdersByBatchHistorical(client, commands, settings);
+            return;
+        }
+
+        Console.WriteLine(
+            $"\n🚀 [BENCHMARK] Starting Batching (Size: {settings.BatchSize}, Streams: {settings.Concurrency})...");
+
+        if (settings.EnableRandomOrderPacing)
+        {
+            Console.WriteLine(
+                $"⏱ Random pacing enabled at {settings.RandomOrderPerSecond:N0} orders/sec total (~{settings.PerStreamRate:N0}/stream)");
+        }
 
         var sw = Stopwatch.StartNew();
         long successCount = 0;
         var tasks = new List<Task>();
-
-        // Thread-safe bag to collect all batch round-trip latencies
         var latencies = new ConcurrentBag<double>();
 
         int totalCommands = commands.Length;
-        int commandsPerTask = totalCommands / Concurrency;
+        int commandsPerTask = totalCommands / settings.Concurrency;
 
-        for (int i = 0; i < Concurrency; i++)
+        for (int i = 0; i < settings.Concurrency; i++)
         {
             int taskIndex = i;
             int localStart = taskIndex * commandsPerTask;
-            int localEnd = (taskIndex == Concurrency - 1) ? totalCommands : localStart + commandsPerTask;
+            int localEnd = (taskIndex == settings.Concurrency - 1)
+                ? totalCommands
+                : localStart + commandsPerTask;
 
             tasks.Add(Task.Run(async () =>
             {
                 using var call = client.PlaceBatchStream();
-
-                // Queue to track timestamps for this specific stream (FIFO)
                 var batchTimestamps = new ConcurrentQueue<long>();
+                var pacer = settings.EnableRandomOrderPacing && settings.RandomOrderPerSecond > 0
+                    ? new RandomOrderRatePacer(settings.PerStreamRate)
+                    : null;
 
                 var readTask = Task.Run(async () =>
                 {
@@ -264,18 +302,17 @@ class Program
                     {
                         await foreach (var response in call.ResponseStream.ReadAllAsync())
                         {
-                            if (response.Success)
-                            {
-                                // Dequeue the timestamp of the oldest unacknowledged batch
-                                if (batchTimestamps.TryDequeue(out long startTicks))
-                                {
-                                    double elapsedMs = (Stopwatch.GetTimestamp() - startTicks) * 1000.0 /
-                                                       Stopwatch.Frequency;
-                                    latencies.Add(elapsedMs);
-                                }
+                            if (!response.Success)
+                                continue;
 
-                                Interlocked.Add(ref successCount, (long)response.QueuedCount);
+                            if (batchTimestamps.TryDequeue(out long startTicks))
+                            {
+                                double elapsedMs =
+                                    (Stopwatch.GetTimestamp() - startTicks) * 1000.0 / Stopwatch.Frequency;
+                                latencies.Add(elapsedMs);
                             }
+
+                            Interlocked.Add(ref successCount, (long)response.QueuedCount);
                         }
                     }
                     catch (RpcException ex)
@@ -285,7 +322,7 @@ class Program
                 });
 
                 var batch = new EngineBatchCommand();
-                batch.Commands.Capacity = batchSize;
+                batch.Commands.Capacity = settings.BatchSize;
 
                 try
                 {
@@ -293,14 +330,16 @@ class Program
                     {
                         batch.Commands.Add(commands[j]);
 
-                        if (batch.Commands.Count >= batchSize)
+                        if (batch.Commands.Count >= settings.BatchSize)
                         {
-                            // Record timestamp exactly before sending
                             batchTimestamps.Enqueue(Stopwatch.GetTimestamp());
                             await call.RequestStream.WriteAsync(batch);
 
+                            if (pacer != null)
+                                await pacer.WaitAsync(batch.Commands.Count);
+
                             batch = new EngineBatchCommand();
-                            batch.Commands.Capacity = batchSize;
+                            batch.Commands.Capacity = settings.BatchSize;
                         }
                     }
 
@@ -308,6 +347,9 @@ class Program
                     {
                         batchTimestamps.Enqueue(Stopwatch.GetTimestamp());
                         await call.RequestStream.WriteAsync(batch);
+
+                        if (pacer != null)
+                            await pacer.WaitAsync(batch.Commands.Count);
                     }
 
                     await call.RequestStream.CompleteAsync();
@@ -324,28 +366,158 @@ class Program
         await Task.WhenAll(tasks);
         sw.Stop();
 
-        // Calculate Percentiles
+        PrintResults("BATCH REPLAY RESULT", successCount, sw, latencies.ToArray());
+    }
+
+    private static async Task SendOrdersByBatchHistorical(
+        MatchingEngine.MatchingEngineClient client,
+        EngineCommand[] commands,
+        MarketSimulatorSettings settings)
+    {
+        Console.WriteLine(
+            $"\n🚀 [BENCHMARK] Starting Historical Batching (Size: {settings.BatchSize}, Speed: x{settings.ReplaySpeed:0.###})...");
+        Console.WriteLine("⏱ Historical batching groups consecutive commands with the same timestamp.");
+
+        var sw = Stopwatch.StartNew();
+        long successCount = 0;
+
+        using var call = client.PlaceBatchStream();
+        var pacer = new HistoricalOrderPacer(settings.ReplaySpeed);
+
+        var batchSendTicks = new ConcurrentQueue<long>();
+        var latencies = new List<double>();
+
+        var readTask = Task.Run(async () =>
+        {
+            try
+            {
+                await foreach (var response in call.ResponseStream.ReadAllAsync())
+                {
+                    if (!response.Success)
+                        continue;
+
+                    if (batchSendTicks.TryDequeue(out long startTicks))
+                    {
+                        double elapsedMs =
+                            (Stopwatch.GetTimestamp() - startTicks) * 1000.0 / Stopwatch.Frequency;
+                        latencies.Add(elapsedMs);
+                    }
+
+                    Interlocked.Add(ref successCount, (long)response.QueuedCount);
+                }
+            }
+            catch (RpcException ex)
+            {
+                Console.WriteLine($"\n❌ Historical batch reader broke: {ex.Status.Detail}");
+            }
+        });
+
+        try
+        {
+            var batch = new EngineBatchCommand();
+            batch.Commands.Capacity = settings.BatchSize;
+
+            long? batchTimestamp = null;
+
+            foreach (var command in commands)
+            {
+                long? commandTimestamp = TryGetHistoricalTimestampMs(command);
+
+                bool shouldFlush =
+                    batch.Commands.Count > 0 &&
+                    (
+                        batch.Commands.Count >= settings.BatchSize ||
+                        !SameTimestamp(batchTimestamp, commandTimestamp)
+                    );
+
+                if (shouldFlush)
+                {
+                    await pacer.WaitAsync(batchTimestamp);
+
+                    batchSendTicks.Enqueue(Stopwatch.GetTimestamp());
+                    await call.RequestStream.WriteAsync(batch);
+
+                    batch = new EngineBatchCommand();
+                    batch.Commands.Capacity = settings.BatchSize;
+                    batchTimestamp = null;
+                }
+
+                if (batch.Commands.Count == 0)
+                    batchTimestamp = commandTimestamp;
+
+                batch.Commands.Add(command);
+            }
+
+            if (batch.Commands.Count > 0)
+            {
+                await pacer.WaitAsync(batchTimestamp);
+
+                batchSendTicks.Enqueue(Stopwatch.GetTimestamp());
+                await call.RequestStream.WriteAsync(batch);
+            }
+
+            await call.RequestStream.CompleteAsync();
+        }
+        catch (RpcException ex)
+        {
+            Console.WriteLine($"\n❌ Historical batch writer broke: {ex.Status.Detail}");
+        }
+
+        await readTask;
+        sw.Stop();
+
+        PrintResults("HISTORICAL BATCH REPLAY RESULT", successCount, sw, latencies);
+    }
+
+    private static long? TryGetHistoricalTimestampMs(EngineCommand command)
+    {
+        if (command?.PlaceOrder != null && command.PlaceOrder.Timestamp > 0)
+            return command.PlaceOrder.Timestamp;
+
+        if (command?.CancelOrder != null && command.CancelOrder.Timestamp > 0)
+            return command.CancelOrder.Timestamp;
+
+        return null;
+    }
+
+    private static bool SameTimestamp(long? left, long? right)
+    {
+        if (!left.HasValue && !right.HasValue)
+            return true;
+
+        if (left.HasValue && right.HasValue)
+            return left.Value == right.Value;
+
+        return false;
+    }
+
+    private static void PrintResults(
+        string title,
+        long successCount,
+        Stopwatch sw,
+        IReadOnlyList<double> latencies)
+    {
         var sorted = latencies.ToArray();
         Array.Sort(sorted);
 
-        double p0 = sorted.Length > 0 ? sorted[0] : 0; // Min
-        double p50 = sorted.Length > 0 ? sorted[(int)(sorted.Length * 0.50)] : 0; // Median
-        double p99 = sorted.Length > 0 ? sorted[(int)(sorted.Length * 0.99)] : 0;
-        double p999 = sorted.Length > 0 ? sorted[(int)(sorted.Length * 0.999)] : 0;
-        double p100 = sorted.Length > 0 ? sorted[^1] : 0; // Max
+        double p0 = sorted.Length > 0 ? sorted[0] : 0;
+        double p50 = sorted.Length > 0 ? sorted[(int)(sorted.Length * 0.50)] : 0;
+        double p99 = sorted.Length > 0 ? sorted[Math.Min((int)(sorted.Length * 0.99), sorted.Length - 1)] : 0;
+        double p999 = sorted.Length > 0 ? sorted[Math.Min((int)(sorted.Length * 0.999), sorted.Length - 1)] : 0;
+        double p100 = sorted.Length > 0 ? sorted[^1] : 0;
 
-        Console.WriteLine($"\n========================================");
-        Console.WriteLine($"🏁 BATCH REPLAY RESULT (50M READY)");
-        Console.WriteLine($"========================================");
+        Console.WriteLine("\n========================================");
+        Console.WriteLine($"🏁 {title}");
+        Console.WriteLine("========================================");
         Console.WriteLine($"⚡ TPS: {successCount / sw.Elapsed.TotalSeconds:N0} messages/sec");
         Console.WriteLine($"✅ Delivered: {successCount:N0}");
-        Console.WriteLine($"========================================");
-        Console.WriteLine($"⏱️ Latency Min (p0):   {p0:F3} ms");
-        Console.WriteLine($"⏱️ Latency Median(p50):{p50:F3} ms");
-        Console.WriteLine($"⏱️ Latency p99:        {p99:F3} ms");
-        Console.WriteLine($"⏱️ Latency p99.9:      {p999:F3} ms");
-        Console.WriteLine($"⏱️ Latency Max (p100): {p100:F3} ms");
-        Console.WriteLine($"========================================");
+        Console.WriteLine("========================================");
+        Console.WriteLine($"⏱️ Latency Min (p0):    {p0:F3} ms");
+        Console.WriteLine($"⏱️ Latency Median(p50): {p50:F3} ms");
+        Console.WriteLine($"⏱️ Latency p99:         {p99:F3} ms");
+        Console.WriteLine($"⏱️ Latency p99.9:       {p999:F3} ms");
+        Console.WriteLine($"⏱️ Latency Max (p100):  {p100:F3} ms");
+        Console.WriteLine("========================================");
     }
 
     private static EngineCommand GenerateRandomOrderRequest(int index)
@@ -354,7 +526,7 @@ class Program
         {
             PlaceOrder = new OrderRequest
             {
-                ClientId = (ulong)(1000000 + index),
+                ClientId = (ulong)(1_000_000 + index),
                 Price = (ulong)Random.Shared.Next(100, 201),
                 Qty = (ulong)Random.Shared.Next(1, 100),
                 Side = Random.Shared.Next(0, 2) == 0 ? Side.Bid : Side.Ask,
@@ -368,10 +540,106 @@ class Program
     {
         return new EngineCommand
         {
-            CancelOrder = new CancelRequest()
+            CancelOrder = new CancelRequest
             {
-                ClientId = (ulong)(1000000 + index)
+                ClientId = (ulong)(1_000_000 + index),
+                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
             }
         };
+    }
+
+    private sealed class RandomOrderRatePacer
+    {
+        private readonly double _ordersPerSecond;
+        private readonly long _startTicks;
+        private long _sentOrders;
+
+        public RandomOrderRatePacer(double ordersPerSecond)
+        {
+            if (ordersPerSecond <= 0)
+                throw new ArgumentOutOfRangeException(nameof(ordersPerSecond), "Random order rate must be > 0.");
+
+            _ordersPerSecond = ordersPerSecond;
+            _startTicks = Stopwatch.GetTimestamp();
+        }
+
+        public async Task WaitAsync(int sentCount)
+        {
+            _sentOrders += sentCount;
+
+            double targetElapsedMs = _sentOrders * 1000.0 / _ordersPerSecond;
+
+            while (true)
+            {
+                double actualElapsedMs =
+                    (Stopwatch.GetTimestamp() - _startTicks) * 1000.0 / Stopwatch.Frequency;
+
+                double remainingMs = targetElapsedMs - actualElapsedMs;
+
+                if (remainingMs <= 0)
+                    return;
+
+                if (remainingMs > 2)
+                    await Task.Delay(TimeSpan.FromMilliseconds(Math.Max(1, remainingMs - 1)));
+                else
+                    Thread.SpinWait(500);
+            }
+        }
+    }
+
+    private sealed class HistoricalOrderPacer
+    {
+        private readonly double _speed;
+        private long? _firstHistoricalTimestampMs;
+        private long _replayStartTicks;
+        private long _lastHistoricalTimestampMs;
+
+        public HistoricalOrderPacer(double speed)
+        {
+            if (speed <= 0)
+                throw new ArgumentOutOfRangeException(nameof(speed), "Replay speed must be > 0.");
+
+            _speed = speed;
+        }
+
+        public async Task WaitAsync(long? historicalTimestampMs)
+        {
+            if (!historicalTimestampMs.HasValue || historicalTimestampMs.Value <= 0)
+                return;
+
+            long ts = historicalTimestampMs.Value;
+
+            if (!_firstHistoricalTimestampMs.HasValue)
+            {
+                _firstHistoricalTimestampMs = ts;
+                _lastHistoricalTimestampMs = ts;
+                _replayStartTicks = Stopwatch.GetTimestamp();
+                return;
+            }
+
+            if (ts < _lastHistoricalTimestampMs)
+                ts = _lastHistoricalTimestampMs;
+
+            _lastHistoricalTimestampMs = ts;
+
+            double historicalElapsedMs = ts - _firstHistoricalTimestampMs.Value;
+            double targetReplayElapsedMs = historicalElapsedMs / _speed;
+
+            while (true)
+            {
+                double actualReplayElapsedMs =
+                    (Stopwatch.GetTimestamp() - _replayStartTicks) * 1000.0 / Stopwatch.Frequency;
+
+                double remainingMs = targetReplayElapsedMs - actualReplayElapsedMs;
+
+                if (remainingMs <= 0)
+                    return;
+
+                if (remainingMs > 2)
+                    await Task.Delay(TimeSpan.FromMilliseconds(Math.Max(1, remainingMs - 1)));
+                else
+                    Thread.SpinWait(500);
+            }
+        }
     }
 }
