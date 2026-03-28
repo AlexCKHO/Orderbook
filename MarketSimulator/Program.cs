@@ -12,7 +12,8 @@ namespace MarketSimulator;
 
 class Program
 {
-    private const int TotalOrders = 5_000_000;
+    private const int NoOfOrderToTest = 13_000_000;
+    private const int Repeat = 4;
     private const string Address = "http://127.0.0.1:50051";
     private const int Concurrency = 4;
     private const int BatchSize = 5000;
@@ -50,6 +51,7 @@ class Program
         var jsonPath = config["DataSettings:BinanceJsonDataPath"];
         var engineCommands = new List<EngineCommand>();
 
+
         if (UseHistorical)
         {
             try
@@ -58,8 +60,8 @@ class Program
                 {
                     using var input = File.OpenRead(binPath);
                     while (input.Position < input.Length
-                           // && engineCommands.Count < 10_000
-                           )
+                           && engineCommands.Count < NoOfOrderToTest
+                          )
                     {
                         var command = EngineCommand.Parser.ParseDelimitedFrom(input);
                         if (command != null) engineCommands.Add(command);
@@ -79,7 +81,7 @@ class Program
         }
         else
         {
-            for (int i = 0; i < TotalOrders; i++)
+            for (int i = 0; i < NoOfOrderToTest; i++)
             {
                 // Use Random.Shared for both to ensure thread-safety and proper seeding
                 if (Random.Shared.Next(0, 2) == 0)
@@ -124,16 +126,19 @@ class Program
 
         GC.Collect();
         GC.WaitForPendingFinalizers();
-
-        if (choice == "1")
+        
+        for (int i = 0; i < Repeat; i++)
         {
-            GC.Collect();
-            await SendOrderSequentially(client, engineCommands.ToArray());
-        }
-        else
-        {
-            GC.Collect();
-            await SendOrdersByBatch(client, engineCommands.ToArray(), BatchSize);
+            if (choice == "1")
+            {
+                GC.Collect();
+                await SendOrderSequentially(client, engineCommands.ToArray());
+            }
+            else
+            {
+                GC.Collect();
+                await SendOrdersByBatch(client, engineCommands.ToArray(), BatchSize);
+            }
         }
     }
 
@@ -147,35 +152,81 @@ class Program
 
         using var call = client.PlaceBatchStream();
 
+        // Queue to track timestamps (FIFO - First-In-First-Out)
+        var timestamps = new ConcurrentQueue<long>();
+
+        // Pre-allocate the list to avoid ANY memory resizing during the benchmark
+        var latencies = new List<double>(commands.Length);
+
         var readTask = Task.Run(async () =>
         {
-            await foreach (var response in call.ResponseStream.ReadAllAsync())
+            try
             {
-                if (response.Success)
+                await foreach (var response in call.ResponseStream.ReadAllAsync())
                 {
-                    Interlocked.Add(ref successCount, (long)response.QueuedCount);
+                    if (response.Success)
+                    {
+                        // Match the response to the oldest unacknowledged request
+                        if (timestamps.TryDequeue(out long startTicks))
+                        {
+                            double elapsedMs = (Stopwatch.GetTimestamp() - startTicks) * 1000.0 / Stopwatch.Frequency;
+                            latencies.Add(
+                                elapsedMs); // Safe to use standard List here because only ONE thread is reading
+                        }
+
+                        Interlocked.Add(ref successCount, (long)response.QueuedCount);
+                    }
                 }
+            }
+            catch (RpcException ex)
+            {
+                Console.WriteLine($"\n❌ Reader broke: {ex.Status.Detail}");
             }
         });
 
-        foreach (var command in commands)
+        try
         {
-            var batch = new EngineBatchCommand();
-            batch.Commands.Add(command);
+            foreach (var command in commands)
+            {
+                var batch = new EngineBatchCommand();
+                batch.Commands.Add(command);
 
-            await call.RequestStream.WriteAsync(batch);
+                // Record the exact tick before pushing to the network
+                timestamps.Enqueue(Stopwatch.GetTimestamp());
+                await call.RequestStream.WriteAsync(batch);
+            }
+
+            await call.RequestStream.CompleteAsync();
+        }
+        catch (RpcException ex)
+        {
+            Console.WriteLine($"\n❌ Writer broke: {ex.Status.Detail}");
         }
 
-        await call.RequestStream.CompleteAsync();
         await readTask;
-
         sw.Stop();
+
+        // Calculate Percentiles
+        var sorted = latencies.ToArray();
+        Array.Sort(sorted);
+
+        double p0 = sorted.Length > 0 ? sorted[0] : 0; // Min
+        double p50 = sorted.Length > 0 ? sorted[(int)(sorted.Length * 0.50)] : 0; // Median
+        double p99 = sorted.Length > 0 ? sorted[(int)(sorted.Length * 0.99)] : 0;
+        double p999 = sorted.Length > 0 ? sorted[(int)(sorted.Length * 0.999)] : 0;
+        double p100 = sorted.Length > 0 ? sorted[^1] : 0; // Max
 
         Console.WriteLine($"\n========================================");
         Console.WriteLine($"🏁 SEQUENTIAL REPLAY RESULT");
         Console.WriteLine($"========================================");
         Console.WriteLine($"⚡ TPS: {successCount / sw.Elapsed.TotalSeconds:N0} messages/sec");
         Console.WriteLine($"✅ Delivered via gRPC: {successCount:N0}");
+        Console.WriteLine($"========================================");
+        Console.WriteLine($"⏱️ Latency Min (p0):   {p0:F3} ms");
+        Console.WriteLine($"⏱️ Latency Median(p50):{p50:F3} ms");
+        Console.WriteLine($"⏱️ Latency p99:        {p99:F3} ms");
+        Console.WriteLine($"⏱️ Latency p99.9:      {p999:F3} ms");
+        Console.WriteLine($"⏱️ Latency Max (p100): {p100:F3} ms");
         Console.WriteLine($"========================================");
     }
 
@@ -187,6 +238,9 @@ class Program
         var sw = Stopwatch.StartNew();
         long successCount = 0;
         var tasks = new List<Task>();
+
+        // Thread-safe bag to collect all batch round-trip latencies
+        var latencies = new ConcurrentBag<double>();
 
         int totalCommands = commands.Length;
         int commandsPerTask = totalCommands / Concurrency;
@@ -201,6 +255,9 @@ class Program
             {
                 using var call = client.PlaceBatchStream();
 
+                // Queue to track timestamps for this specific stream (FIFO)
+                var batchTimestamps = new ConcurrentQueue<long>();
+
                 var readTask = Task.Run(async () =>
                 {
                     try
@@ -209,6 +266,14 @@ class Program
                         {
                             if (response.Success)
                             {
+                                // Dequeue the timestamp of the oldest unacknowledged batch
+                                if (batchTimestamps.TryDequeue(out long startTicks))
+                                {
+                                    double elapsedMs = (Stopwatch.GetTimestamp() - startTicks) * 1000.0 /
+                                                       Stopwatch.Frequency;
+                                    latencies.Add(elapsedMs);
+                                }
+
                                 Interlocked.Add(ref successCount, (long)response.QueuedCount);
                             }
                         }
@@ -219,7 +284,6 @@ class Program
                     }
                 });
 
-                // Start with a fresh batch
                 var batch = new EngineBatchCommand();
                 batch.Commands.Capacity = batchSize;
 
@@ -231,6 +295,8 @@ class Program
 
                         if (batch.Commands.Count >= batchSize)
                         {
+                            // Record timestamp exactly before sending
+                            batchTimestamps.Enqueue(Stopwatch.GetTimestamp());
                             await call.RequestStream.WriteAsync(batch);
 
                             batch = new EngineBatchCommand();
@@ -238,9 +304,9 @@ class Program
                         }
                     }
 
-                    // Flush any remaining orders at the end
                     if (batch.Commands.Count > 0)
                     {
+                        batchTimestamps.Enqueue(Stopwatch.GetTimestamp());
                         await call.RequestStream.WriteAsync(batch);
                     }
 
@@ -258,11 +324,27 @@ class Program
         await Task.WhenAll(tasks);
         sw.Stop();
 
+        // Calculate Percentiles
+        var sorted = latencies.ToArray();
+        Array.Sort(sorted);
+
+        double p0 = sorted.Length > 0 ? sorted[0] : 0; // Min
+        double p50 = sorted.Length > 0 ? sorted[(int)(sorted.Length * 0.50)] : 0; // Median
+        double p99 = sorted.Length > 0 ? sorted[(int)(sorted.Length * 0.99)] : 0;
+        double p999 = sorted.Length > 0 ? sorted[(int)(sorted.Length * 0.999)] : 0;
+        double p100 = sorted.Length > 0 ? sorted[^1] : 0; // Max
+
         Console.WriteLine($"\n========================================");
         Console.WriteLine($"🏁 BATCH REPLAY RESULT (50M READY)");
         Console.WriteLine($"========================================");
         Console.WriteLine($"⚡ TPS: {successCount / sw.Elapsed.TotalSeconds:N0} messages/sec");
-        Console.WriteLine($"✅ Delivered via gRPC: {successCount:N0}");
+        Console.WriteLine($"✅ Delivered: {successCount:N0}");
+        Console.WriteLine($"========================================");
+        Console.WriteLine($"⏱️ Latency Min (p0):   {p0:F3} ms");
+        Console.WriteLine($"⏱️ Latency Median(p50):{p50:F3} ms");
+        Console.WriteLine($"⏱️ Latency p99:        {p99:F3} ms");
+        Console.WriteLine($"⏱️ Latency p99.9:      {p999:F3} ms");
+        Console.WriteLine($"⏱️ Latency Max (p100): {p100:F3} ms");
         Console.WriteLine($"========================================");
     }
 

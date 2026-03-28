@@ -3,6 +3,7 @@ use crate::infrastructure::grpc_gateway::GrpcGateway;
 use crate::infrastructure::redpanda_gateway::{RedpandaConsumer, RedpandaProducer};
 use crate::models::events::MatchEvent;
 use crate::models::order::EngineAction;
+use crate::services::dispatcher_service::DispatcherService;
 use crate::services::matching_engine_service::MatchingEngineService;
 use dotenvy::dotenv;
 use std::sync::Arc;
@@ -31,15 +32,17 @@ async fn main() {
     let tps_counter = Arc::new(AtomicU64::new(0));
 
     // main.rs
-    let (inbound_tx, inbound_rx) = mpsc::channel::<Vec<EngineAction>>(128); // 夠晒數
-    let (outbound_tx, outbound_rx) = mpsc::channel::<MatchEvent>(1_000_000); // 畀多啲空間緩衝
+    let (inbound_tx, inbound_rx) = mpsc::channel::<Vec<EngineAction>>(128);
+    let (dispatcher_tx, dispatcher_rx) = mpsc::channel::<Vec<MatchEvent>>(2048);
+    let (kafka_tx, kafka_rx) = mpsc::channel::<Vec<MatchEvent>>(8192);
 
     // 1. Initialize handles as Options or empty vectors outside the if blocks
     let mut consumer_tasks = Vec::new();
     let mut producer_handle = None;
+    let mut dispatcher_handle = None;
 
-    let use_redpanda_consumer = false;
-    let use_redpanda_producer = false;
+    let use_redpanda_consumer = true;
+    let use_redpanda_producer = true;
 
     // Setting up kafka consumer
     if use_redpanda_consumer {
@@ -62,12 +65,16 @@ async fn main() {
     if use_redpanda_producer {
         let producer = RedpandaProducer::new(&cfg.brokers, &cfg.group_id, &cfg.events_topic);
         producer_handle = Some(tokio::spawn(async move {
-            producer.start_event_producer(outbound_rx).await;
+            producer.start_event_producer(kafka_rx).await;
+        }));
+
+        let dispatcher = DispatcherService::new(kafka_tx);
+        dispatcher_handle = Some(tokio::spawn(async move {
+            dispatcher.run(dispatcher_rx).await;
         }));
     }
 
     // gRPC setup...
-
     if cfg.use_historical_data {
         let grpc_gateway = GrpcGateway::new(inbound_tx.clone());
         let service = MatchingEngineServer::new(grpc_gateway)
@@ -84,7 +91,7 @@ async fn main() {
         });
     }
 
-    let service = MatchingEngineService::new(outbound_tx);
+    let service = MatchingEngineService::new(dispatcher_tx);
     let engine_counter = Arc::clone(&tps_counter);
     let engine_handle = tokio::spawn(async move {
         service.run_matching_actor(inbound_rx, engine_counter).await;
@@ -107,6 +114,14 @@ async fn main() {
         }
     };
 
+    let dispatcher_future = async {
+        if let Some(h) = dispatcher_handle {
+            let _ = h.await;
+        } else {
+            futures::future::pending::<()>().await;
+        }
+    };
+
     println!("✅ Engine started. Press Ctrl+C to stop.");
 
     tokio::select! {
@@ -118,6 +133,9 @@ async fn main() {
         },
         _ = producer_future => {
             eprintln!("Producer exited.");
+        },
+        _ = dispatcher_future => {
+            eprintln!("Dispatcher exited.");
         },
         res = engine_handle => {
             eprintln!("Engine exited: {:?}", res);

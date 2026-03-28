@@ -8,7 +8,7 @@ public class BinanceDataParser
 {
     private readonly Dictionary<ulong, ulong> _activeBids = new();
     private readonly Dictionary<ulong, ulong> _activeAsks = new();
-    private ulong _currentOrderId = 10_000_00;
+    private ulong _currentOrderId = 10_000;
     
     public int CorruptedLinesCount { get; private set; } = 0;
 

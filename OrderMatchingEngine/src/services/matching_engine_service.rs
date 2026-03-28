@@ -2,18 +2,19 @@ use crate::models::order_book::OrderBook;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::mpsc;
+use tokio::sync::mpsc::error::TrySendError;
 
 // Internal Models
 use crate::models::events::MatchEvent;
 use crate::models::order::EngineAction;
 
 pub struct MatchingEngineService {
-    outbound_tx: mpsc::Sender<MatchEvent>,
+    dispatcher_tx: mpsc::Sender<Vec<MatchEvent>>,
 }
 
 impl MatchingEngineService {
-    pub fn new(outbound_tx: mpsc::Sender<MatchEvent>) -> Self {
-        Self { outbound_tx }
+    pub fn new(dispatcher_tx: mpsc::Sender<Vec<MatchEvent>>) -> Self {
+        Self { dispatcher_tx }
     }
 
     pub async fn run_matching_actor(
@@ -34,14 +35,27 @@ impl MatchingEngineService {
             // 2. ✅ Unleash the CPU: Process the entire vector synchronously
             order_book.process_batch(cmd_batch, &mut reusable_events_buffer);
 
-            // 3. Send the generated events to Redpanda/Kafka
-            // for event in reusable_events_buffer.iter() {
-            //     if let Err(e) = self.outbound_tx.send(event.clone()).await {
-            //         eprintln!("Critical Error: Outbound channel closed: {}", e);
-            //         break;
-            //     }
-            // }
-            reusable_events_buffer.clear();
+            if !reusable_events_buffer.is_empty() {
+                // Ship the whole event batch in one go so the hot path only pays
+                // a single channel handoff instead of N async sends.
+                let event_batch = std::mem::take(&mut reusable_events_buffer);
+
+                match self.dispatcher_tx.try_send(event_batch) {
+                    Ok(()) => {}
+                    Err(TrySendError::Full(event_batch)) => {
+                        if let Err(e) = self.dispatcher_tx.send(event_batch).await {
+                            eprintln!("Critical Error: Dispatcher channel closed: {}", e);
+                            break;
+                        }
+                    }
+                    Err(TrySendError::Closed(_)) => {
+                        eprintln!("Critical Error: Dispatcher channel closed");
+                        break;
+                    }
+                }
+
+                reusable_events_buffer = Vec::with_capacity(8192);
+            }
 
             // 4. ✅ Add the whole batch size to the TPS counter at once!
             counter.fetch_add(batch_size, Ordering::Relaxed);

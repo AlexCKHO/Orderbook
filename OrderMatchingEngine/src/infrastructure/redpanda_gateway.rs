@@ -133,7 +133,7 @@ impl RedpandaProducer {
         }
     }
 
-    pub async fn start_event_producer(self, outbound_rx: mpsc::Receiver<MatchEvent>) {
+    pub async fn start_event_producer(self, outbound_rx: mpsc::Receiver<Vec<MatchEvent>>) {
         println!("Here:::::! start_event_producer");
         let producer: FutureProducer = ClientConfig::new()
             .set("bootstrap.servers", &self.brokers)
@@ -144,13 +144,15 @@ impl RedpandaProducer {
         let topic_name = self.topic.clone();
         let mut rx = outbound_rx;
 
-        while let Some(event) = rx.recv().await {
-            let bytes = ProtoMatchEvent::from(event).encode_to_vec();
+        while let Some(event_batch) = rx.recv().await {
+            for event in event_batch {
+                let bytes = ProtoMatchEvent::from(event).encode_to_vec();
+                let record = FutureRecord::to(&topic_name).payload(&bytes).key("BTC-USD");
 
-            let record = FutureRecord::to(&topic_name).payload(&bytes).key("BTC-USD");
-            println!("🎯 Sending event");
-            if let Err((e, _)) = producer.send(record, Duration::from_secs(0)).await {
-                eprintln!("Failed to produce event: {:?}", e);
+                // Cold path can absorb Kafka backpressure here without slowing the matcher.
+                if let Err((e, _)) = producer.send(record, Duration::from_secs(1)).await {
+                    eprintln!("Failed to produce event to Redpanda: {:?}", e);
+                }
             }
         }
     }
