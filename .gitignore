@@ -8,6 +8,11 @@ target/
 # Backup files
 **/*.rs.bk
 
+# Profiling and trace files
+*.json.gz
+*.prof
+*.perf
+
 
 # ===========================
 # C# / .NET Ignored Files

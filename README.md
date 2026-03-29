@@ -7,34 +7,27 @@ This project is a high-performance, low-latency electronic trading system consis
 The system follows a distributed, actor-based model to ensure maximum CPU utilization and mechanical sympathy. The architecture is deliberately designed to isolate the synchronous matching core from asynchronous networking I/O.
 
 ```text
-  [ C# Market Simulator ]
-            |
-            |  Multiplexed gRPC Streams
-            |  (Zero-Allocation Batches)
-            v
-  +-----------------------+
-  |   Rust gRPC Gateway   |
-  |   (Tonic / Tokio)     |
-  +-----------------------+
-            |
-            |  mpsc::channel (inbound_tx)
-            |  Type: Vec<EngineAction>
-            v
-  +-----------------------+
-  |    Matching Engine    | <--- ⚡ CPU Hot Path (Synchronous)
-  |  (BTreeMap FIFO LOB)  |
-  +-----------------------+
-            |
-            |  mpsc::channel (outbound_tx)
-            |  Type: Vec<MatchEvent>
-            v
-  +-----------------------+
-  |   Redpanda Producer   |
-  |   (Event Sourcing)    |
-  +-----------------------+
-            |
-            v
-   [ Kafka / Redpanda ]
+[ Simulator / Client ]
+         |
+         | HTTP
+         v
+     [ OMS (C#) ]
+         |
+         | gRPC
+         v
+[ Matching Engine (Rust) ]
+         |
+         | Domain Events
+         v
+    [ Kafka / Redpanda ]
+      |           |           |
+      |           |           |
+      v           v           v
+ [ Projector ] [ Market Data ] [ Notification ]
+      |
+      | SQL
+      v
+ [ Read Model DB ]
 ```
 
 ## Components
