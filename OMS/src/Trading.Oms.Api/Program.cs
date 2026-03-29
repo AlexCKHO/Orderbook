@@ -1,4 +1,4 @@
-namespace OMS;
+namespace Trading.Oms.Api;
 
 public class Program
 {

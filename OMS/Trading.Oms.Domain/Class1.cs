@@ -1,4 +1,4 @@
-﻿namespace Trading.Oms.Domain;
+﻿namespace Trading.Oms.Api.Oms.Domain;
 
 public class Class1
 {

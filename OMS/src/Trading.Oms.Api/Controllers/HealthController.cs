@@ -1,6 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 
-namespace OMS.Controllers;
+namespace Trading.Oms.Api.Controllers;
 
 [ApiController]
 [Route("health")]
