@@ -4,7 +4,7 @@ namespace OMS.Controllers;
 
 [ApiController]
 [Route("health")]
-public class HealthController : Controller
+public class HealthController : ControllerBase
 {
     [HttpGet]
     public IActionResult Get()

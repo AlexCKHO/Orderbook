@@ -3,4 +3,6 @@
 GET {{OMS_HostAddress}}/health/
 Accept: application/json
 
+POST {{OMS_HostAddress}}/api/order/
+Accept: application/json
 ###
