@@ -2,6 +2,12 @@
 Microsoft Visual Studio Solution File, Format Version 12.00
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Trading.Oms.Api", "src/Trading.Oms.Api/Trading.Oms.Api.csproj", "{402834C3-691E-4B1D-AF89-9A4CDF496B2D}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Trading.Oms.Application", "src\Trading.Oms.Application\Trading.Oms.Application.csproj", "{FD096D6D-E5CA-40E7-9D0C-DDC9E503C3AB}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Trading.Oms.Domain", "Trading.Oms.Domain\Trading.Oms.Domain.csproj", "{FE97543C-D5C4-485C-B3BB-BCECCFDD83FF}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Trading.Oms.Infrastructure", "Trading.Oms.Infrastructure\Trading.Oms.Infrastructure.csproj", "{9F8153F6-0427-4F3B-804D-70C77B2C5C54}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -12,5 +18,17 @@ Global
 		{402834C3-691E-4B1D-AF89-9A4CDF496B2D}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{402834C3-691E-4B1D-AF89-9A4CDF496B2D}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{402834C3-691E-4B1D-AF89-9A4CDF496B2D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FD096D6D-E5CA-40E7-9D0C-DDC9E503C3AB}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FD096D6D-E5CA-40E7-9D0C-DDC9E503C3AB}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FD096D6D-E5CA-40E7-9D0C-DDC9E503C3AB}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FD096D6D-E5CA-40E7-9D0C-DDC9E503C3AB}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FE97543C-D5C4-485C-B3BB-BCECCFDD83FF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FE97543C-D5C4-485C-B3BB-BCECCFDD83FF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FE97543C-D5C4-485C-B3BB-BCECCFDD83FF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FE97543C-D5C4-485C-B3BB-BCECCFDD83FF}.Release|Any CPU.Build.0 = Release|Any CPU
+		{9F8153F6-0427-4F3B-804D-70C77B2C5C54}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9F8153F6-0427-4F3B-804D-70C77B2C5C54}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9F8153F6-0427-4F3B-804D-70C77B2C5C54}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9F8153F6-0427-4F3B-804D-70C77B2C5C54}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
