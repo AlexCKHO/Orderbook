@@ -7,7 +7,6 @@ pub struct OrderBook {
     pub asks: BTreeMap<u64, VecDeque<OrderEntry>>,
     pub bids: BTreeMap<u64, VecDeque<OrderEntry>>,
     pub order_locations: HashMap<u64, (u64, Side)>,
-    pub engine_order_id: u64,
     pub trade_id: u64,
 }
 
@@ -17,7 +16,6 @@ impl OrderBook {
             bids: BTreeMap::new(),
             asks: BTreeMap::new(),
             order_locations: HashMap::new(),
-            engine_order_id,
             trade_id,
         }
     }
@@ -35,11 +33,6 @@ impl OrderBook {
         }
     }
 
-    fn next_engine_id(&mut self) -> u64 {
-        let engine_id = self.engine_order_id;
-        self.engine_order_id += 1;
-        engine_id
-    }
 
     pub fn cancel_order(&mut self, order_id: u64, events: &mut Vec<MatchEvent>) {
         let (price, side) = match self.order_locations.remove(&order_id) {
@@ -89,7 +82,6 @@ impl OrderBook {
     pub fn process_single(&mut self, command: EngineAction, events_buffer: &mut Vec<MatchEvent>) {
         match command {
             EngineAction::Create(mut order) => {
-                order.client_id = self.next_engine_id();
                 self.add_order(order, events_buffer)
             }
             EngineAction::Cancel(cancel) => self.cancel_order(cancel.client_id, events_buffer),
