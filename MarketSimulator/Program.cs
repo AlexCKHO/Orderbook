@@ -4,11 +4,47 @@ using Google.Protobuf;
 using Grpc.Core;
 using Grpc.Net.Client;
 using MarketSimulator.Models;
+using MarketSimulator.Pacing;
 using MarketSimulator.Services;
 using Microsoft.Extensions.Configuration;
 using Orderbook;
 
 namespace MarketSimulator;
+
+/*
+============================================================
+SEQUENTIAL MODE PACER SELECTION
+============================================================
+
+UseHistorical -----------\
+                          AND -----> historicalPacer -----> TimestampOrderPacer
+EnableHistoricalPacing --/
+
+!UseHistorical ----------\
+                          AND ---\
+EnableOrderPacing -------/       AND -----> randomPacer -----> OrderRatePacer
+OrderRatePerSecond > 0 ----------/
+
+Runtime choice:
+historicalPacer != null  -----> use TimestampOrderPacer
+else randomPacer != null -----> use OrderRatePacer
+else ---------------------> no pacing
+
+============================================================
+BATCH MODE PACER SELECTION (CURRENT CODE)
+============================================================
+
+EnableHistoricalPacing ---------------------> TimestampOrderPacer
+
+if not EnableHistoricalPacing:
+
+EnableOrderPacing -------\
+                          AND -----> OrderRatePacer
+OrderRatePerSecond > 0 --/
+
+otherwise -------------------------------> no pacing
+
+*/
 
 class Program
 {
@@ -18,7 +54,6 @@ class Program
 
         var configuration = new ConfigurationBuilder()
             .SetBasePath(Directory.GetCurrentDirectory())
-            .AddJsonFile("appsettings.json", optional: true, reloadOnChange: true)
             .AddJsonFile("appsettings.local.json", optional: true, reloadOnChange: true)
             .AddEnvironmentVariables()
             .Build();
@@ -168,20 +203,20 @@ class Program
         Console.WriteLine("🚀 Launching Sequential Market Replay over gRPC...");
 
         bool useHistoricalPacing = settings.UseHistorical && settings.EnableHistoricalPacing;
-        HistoricalOrderPacer? historicalPacer = useHistoricalPacing
-            ? new HistoricalOrderPacer(settings.ReplaySpeed)
+        TimestampRatePacer? historicalPacer = useHistoricalPacing
+            ? new TimestampRatePacer(settings.ReplaySpeed)
             : null;
 
-        RandomOrderRatePacer? randomPacer =
-            !settings.UseHistorical && settings.EnableRandomOrderPacing && settings.RandomOrderPerSecond > 0
-                ? new RandomOrderRatePacer(settings.RandomOrderPerSecond)
+        OrderRatePacer? randomPacer =
+            !settings.UseHistorical && settings.EnableOrderPacing && settings.OrderRatePerSecond > 0
+                ? new OrderRatePacer(settings.OrderRatePerSecond)
                 : null;
 
         if (useHistoricalPacing)
             Console.WriteLine($"⏱ Historical pacing enabled at x{settings.ReplaySpeed:0.###}");
 
         if (!settings.UseHistorical && randomPacer != null)
-            Console.WriteLine($"⏱ Random pacing enabled at {settings.RandomOrderPerSecond:N0} orders/sec");
+            Console.WriteLine($"⏱ Random pacing enabled at {settings.OrderRatePerSecond:N0} orders/sec");
 
         var sw = Stopwatch.StartNew();
         long successCount = 0;
@@ -255,7 +290,8 @@ class Program
         EngineCommand[] commands,
         MarketSimulatorSettings settings)
     {
-        bool useHistoricalBatchPacing = settings.UseHistorical && settings.EnableHistoricalPacing;
+        bool useHistoricalBatchPacing = settings.EnableHistoricalPacing;
+
 
         if (useHistoricalBatchPacing)
         {
@@ -266,10 +302,10 @@ class Program
         Console.WriteLine(
             $"\n🚀 [BENCHMARK] Starting Batching (Size: {settings.BatchSize}, Streams: {settings.Concurrency})...");
 
-        if (settings.EnableRandomOrderPacing)
+        if (settings.EnableOrderPacing)
         {
             Console.WriteLine(
-                $"⏱ Random pacing enabled at {settings.RandomOrderPerSecond:N0} orders/sec total (~{settings.PerStreamRate:N0}/stream)");
+                $"⏱ Random pacing enabled at {settings.OrderRatePerSecond:N0} orders/sec total (~{settings.PerStreamRate:N0}/stream)");
         }
 
         var sw = Stopwatch.StartNew();
@@ -292,8 +328,8 @@ class Program
             {
                 using var call = client.PlaceBatchStream();
                 var batchTimestamps = new ConcurrentQueue<long>();
-                var pacer = settings.EnableRandomOrderPacing && settings.RandomOrderPerSecond > 0
-                    ? new RandomOrderRatePacer(settings.PerStreamRate)
+                var pacer = settings.EnableOrderPacing && settings.OrderRatePerSecond > 0
+                    ? new OrderRatePacer(settings.PerStreamRate)
                     : null;
 
                 var readTask = Task.Run(async () =>
@@ -382,7 +418,7 @@ class Program
         long successCount = 0;
 
         using var call = client.PlaceBatchStream();
-        var pacer = new HistoricalOrderPacer(settings.ReplaySpeed);
+        var pacer = new TimestampRatePacer(settings.ReplaySpeed);
 
         var batchSendTicks = new ConcurrentQueue<long>();
         var latencies = new List<double>();
@@ -546,100 +582,5 @@ class Program
                 Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
             }
         };
-    }
-
-    private sealed class RandomOrderRatePacer
-    {
-        private readonly double _ordersPerSecond;
-        private readonly long _startTicks;
-        private long _sentOrders;
-
-        public RandomOrderRatePacer(double ordersPerSecond)
-        {
-            if (ordersPerSecond <= 0)
-                throw new ArgumentOutOfRangeException(nameof(ordersPerSecond), "Random order rate must be > 0.");
-
-            _ordersPerSecond = ordersPerSecond;
-            _startTicks = Stopwatch.GetTimestamp();
-        }
-
-        public async Task WaitAsync(int sentCount)
-        {
-            _sentOrders += sentCount;
-
-            double targetElapsedMs = _sentOrders * 1000.0 / _ordersPerSecond;
-
-            while (true)
-            {
-                double actualElapsedMs =
-                    (Stopwatch.GetTimestamp() - _startTicks) * 1000.0 / Stopwatch.Frequency;
-
-                double remainingMs = targetElapsedMs - actualElapsedMs;
-
-                if (remainingMs <= 0)
-                    return;
-
-                if (remainingMs > 2)
-                    await Task.Delay(TimeSpan.FromMilliseconds(Math.Max(1, remainingMs - 1)));
-                else
-                    Thread.SpinWait(500);
-            }
-        }
-    }
-
-    private sealed class HistoricalOrderPacer
-    {
-        private readonly double _speed;
-        private long? _firstHistoricalTimestampMs;
-        private long _replayStartTicks;
-        private long _lastHistoricalTimestampMs;
-
-        public HistoricalOrderPacer(double speed)
-        {
-            if (speed <= 0)
-                throw new ArgumentOutOfRangeException(nameof(speed), "Replay speed must be > 0.");
-
-            _speed = speed;
-        }
-
-        public async Task WaitAsync(long? historicalTimestampMs)
-        {
-            if (!historicalTimestampMs.HasValue || historicalTimestampMs.Value <= 0)
-                return;
-
-            long ts = historicalTimestampMs.Value;
-
-            if (!_firstHistoricalTimestampMs.HasValue)
-            {
-                _firstHistoricalTimestampMs = ts;
-                _lastHistoricalTimestampMs = ts;
-                _replayStartTicks = Stopwatch.GetTimestamp();
-                return;
-            }
-
-            if (ts < _lastHistoricalTimestampMs)
-                ts = _lastHistoricalTimestampMs;
-
-            _lastHistoricalTimestampMs = ts;
-
-            double historicalElapsedMs = ts - _firstHistoricalTimestampMs.Value;
-            double targetReplayElapsedMs = historicalElapsedMs / _speed;
-
-            while (true)
-            {
-                double actualReplayElapsedMs =
-                    (Stopwatch.GetTimestamp() - _replayStartTicks) * 1000.0 / Stopwatch.Frequency;
-
-                double remainingMs = targetReplayElapsedMs - actualReplayElapsedMs;
-
-                if (remainingMs <= 0)
-                    return;
-
-                if (remainingMs > 2)
-                    await Task.Delay(TimeSpan.FromMilliseconds(Math.Max(1, remainingMs - 1)));
-                else
-                    Thread.SpinWait(500);
-            }
-        }
     }
 }

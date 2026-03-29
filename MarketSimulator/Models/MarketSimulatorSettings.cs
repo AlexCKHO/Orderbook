@@ -8,10 +8,10 @@ public class MarketSimulatorSettings
     public int Concurrency { get; set; }
     public int BatchSize { get; set; }
     public bool UseHistorical { get; set; }
-    public bool EnableRandomOrderPacing { get; set; }
-    public int RandomOrderPerSecond { get; set; }
+    public bool EnableOrderPacing { get; set; }
+    public int OrderRatePerSecond { get; set; }
     public bool EnableHistoricalPacing { get; set; }
     public double ReplaySpeed { get; set; }
 
-    public double PerStreamRate => Math.Max(1.0, RandomOrderPerSecond / (double)Concurrency);
+    public double PerStreamRate => Math.Max(1.0, OrderRatePerSecond / (double)Concurrency);
 }
