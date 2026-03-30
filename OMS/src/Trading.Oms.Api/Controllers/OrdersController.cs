@@ -10,6 +10,10 @@ public class OrdersController : ControllerBase
     [HttpPost]
     public IActionResult PlaceOrder(PlaceOrderRequest request)
     {
+        
+        
+        
+        
         return Ok(new CommandAckResponse(
             RequestId: "1",
             CorrelationId: "1",

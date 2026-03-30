@@ -14,7 +14,6 @@
     <ItemGroup>
       <Folder Include="Grpc\" />
       <Folder Include="Persistence\" />
-      <Folder Include="Services\" />
     </ItemGroup>
 
 </Project>
