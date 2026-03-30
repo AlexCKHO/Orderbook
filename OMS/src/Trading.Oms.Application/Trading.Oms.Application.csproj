@@ -10,8 +10,4 @@
       <ProjectReference Include="..\..\Trading.Oms.Domain\Trading.Oms.Domain.csproj" />
     </ItemGroup>
 
-    <ItemGroup>
-      <Folder Include="Models\" />
-    </ItemGroup>
-
 </Project>

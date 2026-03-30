@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Trading.Oms.Api.Contracts;
+using Trading.Oms.Application.Commands;
+using Trading.Oms.Application.Models;
 using Trading.Oms.Domain.Enums;
 
 namespace Trading.Oms.Api.Controllers;
@@ -11,6 +13,14 @@ public class OrdersController : ControllerBase
     [HttpPost]
     public IActionResult PlaceOrder(PlaceOrderRequest request)
     {
+        RequestMetadata metadata = new RequestMetadata(
+            requestId: Guid.NewGuid().ToString(),
+            correlationId: Guid.NewGuid().ToString(),
+            idempotencyKey: Guid.NewGuid().ToString(),
+            submittedAtUtc: DateTimeOffset.Now
+        );
+
+        Mapper.MapToPlaceOrderCommand(request, metadata);
         return Ok(new CommandAckResponse(
             RequestId: "1",
             CorrelationId: "1",
