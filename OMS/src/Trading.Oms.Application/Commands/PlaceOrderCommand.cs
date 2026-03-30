@@ -1,16 +1,7 @@
-namespace Trading.Oms.Api.Oms.Application.Commands;
+using Trading.Oms.Domain.Enums;
 
-public enum Side
-{
-    Bid = 1,
-    Ask = 2
-}
+namespace Trading.Oms.Application.Commands;
 
-public enum OrderType
-{
-    Limit = 1,
-    Market = 2
-}
 
 public class PlaceOrderCommand
 {

@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Trading.Oms.Api.Contracts;
+using Trading.Oms.Domain.Enums;
 
 namespace Trading.Oms.Api.Controllers;
 
@@ -10,10 +11,6 @@ public class OrdersController : ControllerBase
     [HttpPost]
     public IActionResult PlaceOrder(PlaceOrderRequest request)
     {
-        
-        
-        
-        
         return Ok(new CommandAckResponse(
             RequestId: "1",
             CorrelationId: "1",
