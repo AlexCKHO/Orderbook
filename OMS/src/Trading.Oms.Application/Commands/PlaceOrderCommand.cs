@@ -5,18 +5,18 @@ namespace Trading.Oms.Application.Commands;
 
 public class PlaceOrderCommand
 {
-    uint AccountId { get; }
+    public uint AccountId { get; }
 
-    // uint OrderId { get; }
-    string Symbol { get; }
-    Side Side { get; }
-    OrderType OrderType { get; }
-    ulong Quantity { get; }
-    ulong? Price { get; }
-    string RequestId { get; }
-    string CorrelationId { get; }
-    string IdempotencyKey { get; }
-    DateTimeOffset SubmittedAtUtc { get; }
+    // public uint OrderId { get; }
+    public  string Symbol { get; }
+    public  Side Side { get; }
+    public  OrderType OrderType { get; }
+    public  ulong Quantity { get; }
+    public  ulong? Price { get; }
+    public  string RequestId { get; }
+    public  string CorrelationId { get; }
+    public  string IdempotencyKey { get; }
+    public  DateTimeOffset SubmittedAtUtc { get; }
 
 
     public PlaceOrderCommand(uint accountId, string symbol, Side side, OrderType orderType, ulong quantity,

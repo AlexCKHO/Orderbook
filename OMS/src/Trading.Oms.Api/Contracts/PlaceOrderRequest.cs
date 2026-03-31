@@ -11,4 +11,5 @@ public sealed record PlaceOrderRequest(
     OrderType OrderType,
     ulong Quantity,
     ulong? Price
+    
 );

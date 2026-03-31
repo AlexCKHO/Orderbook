@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Trading.Oms.Api.Contracts;
+using Trading.Oms.Api.Mappers;
 using Trading.Oms.Application.Commands;
 using Trading.Oms.Application.Models;
 using Trading.Oms.Domain.Enums;
@@ -13,21 +14,34 @@ public class OrdersController : ControllerBase
     [HttpPost]
     public IActionResult PlaceOrder(PlaceOrderRequest request)
     {
+        
+        string? correlationId = Request.Headers["X-Correlation-ID"].FirstOrDefault();
+        string? idempotencyKey = Request.Headers["X-Idempotency-Key"].FirstOrDefault();
+
+        if (String.IsNullOrEmpty(idempotencyKey))
+        {
+            return BadRequest("Missing Idempotency Key");
+        }
+
         RequestMetadata metadata = new RequestMetadata(
             requestId: Guid.NewGuid().ToString(),
-            correlationId: Guid.NewGuid().ToString(),
-            idempotencyKey: Guid.NewGuid().ToString(),
+            correlationId: correlationId ?? Guid.NewGuid().ToString(),
+            idempotencyKey: idempotencyKey,
             submittedAtUtc: DateTimeOffset.Now
         );
 
-        Mapper.MapToPlaceOrderCommand(request, metadata);
+       PlaceOrderCommand command = Mapper.MapToPlaceOrderCommand(request, metadata);
+       
+        
+        
+        
         return Ok(new CommandAckResponse(
             RequestId: "1",
             CorrelationId: "1",
             IdempotencyKey: "1",
             CommandType: CommandType.PlaceOrder,
             Status: Status.Submitted,
-            OrderId: 123,
+            OrderId: 0,
             RejectionCode: null,
             RejectionReason: null,
             ReceivedAtUtc: DateTimeOffset.Now)

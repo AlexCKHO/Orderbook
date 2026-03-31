@@ -2,7 +2,7 @@ using Trading.Oms.Api.Contracts;
 using Trading.Oms.Application.Commands;
 using Trading.Oms.Application.Models;
 
-namespace Trading.Oms.Api;
+namespace Trading.Oms.Api.Mappers;
 
 public class Mapper
 {
