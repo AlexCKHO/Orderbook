@@ -1,11 +1,19 @@
+using Trading.Oms.Api.Oms.Domain.Interface;
+
 namespace Trading.Oms.Api.Oms.Domain.Services;
 
-public class OrderIdComposer
+public class OrderIdComposer : IOrderIdComposer
 {
-    public static ulong ComposeOrderId(uint accountId, uint sequence)
+    public ulong Compose(uint accountId, uint sequence)
     {
-        ulong result = accountId * 10 + sequence;
-        return result;
+        return ((ulong)accountId << 32) | sequence;
     }
-    public static 
+
+    public (uint accountId, uint sequence) Decompose(uint orderId)
+    {
+        uint accountId = orderId >> 32;
+        uint sequence = orderId;
+
+        return (accountId, sequence);
+    }
 }
