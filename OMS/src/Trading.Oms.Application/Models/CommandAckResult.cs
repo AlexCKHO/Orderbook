@@ -2,7 +2,7 @@ using Trading.Oms.Domain.Enums;
 
 namespace Trading.Oms.Application.Models;
 
-public class PlaceOrderResult
+public class CommandAckResult
 {
     private string RequestId { get; }
     string CorrelationId { get; }
@@ -14,7 +14,7 @@ public class PlaceOrderResult
     string? RejectionReason { get; }
     DateTimeOffset ReceivedAtUtc { get; }
 
-    public PlaceOrderResult(string requestId, string correlationId, string idempotencyKey, CommandType commandType,
+    public CommandAckResult(string requestId, string correlationId, string idempotencyKey, CommandType commandType,
         Status status, ulong? orderId, RejectionCode? rejectionCode, string? rejectionReason,
         DateTimeOffset receivedAtUtc)
     {

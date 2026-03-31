@@ -11,23 +11,24 @@ public class PlaceOrderCommandHandler
     private IOrderSequenceAllocator _orderSequenceAllocator;
     private IOrderIdComposer _orderIdComposer;
 
-    public async Task<PlaceOrderResult> HandlePlaceOrderCommand(PlaceOrderCommand placeOrderCommand)
+
+    public async Task<CommandAckResult> HandlePlaceOrderCommand(PlaceOrderCommand placeOrderCommand)
     {
-        var (isValid, rejectCode, reason) = ValidatePlaceOrder(placeOrderCommand);
+        var (isValid, rejectCode, reason) = _validate(placeOrderCommand);
 
         if (!isValid)
         {
-            return CreateResult(placeOrderCommand, Status.Rejected, null, rejectCode, reason);
+            return _createResult(placeOrderCommand, Status.Rejected, null, rejectCode, reason);
         }
 
         var sequence = await _orderSequenceAllocator.AllocateNextSequenceForAccount(placeOrderCommand.AccountId);
         var orderId = _orderIdComposer.Compose(placeOrderCommand.AccountId, sequence);
 
 
-        return CreateResult(placeOrderCommand, Status.Submitted, orderId);
+        return _createResult(placeOrderCommand, Status.Submitted, orderId);
     }
 
-    private (bool IsValid, RejectionCode? Code, string? Reason) ValidatePlaceOrder(PlaceOrderCommand cmd)
+    private static (bool IsValid, RejectionCode? Code, string? Reason) _validate(PlaceOrderCommand cmd)
     {
         if (cmd.AccountId <= 0)
             return (false, RejectionCode.INVALID_ACCOUNT_ID, "Account ID must be positive.");
@@ -50,14 +51,14 @@ public class PlaceOrderCommandHandler
         return (true, null, null);
     }
 
-    private PlaceOrderResult CreateResult(
+    private static CommandAckResult _createResult(
         PlaceOrderCommand cmd,
         Status status,
         ulong? orderId = null,
         RejectionCode? code = null,
         string? reason = null)
     {
-        return new PlaceOrderResult(
+        return new CommandAckResult(
             requestId: cmd.RequestId,
             correlationId: cmd.CorrelationId,
             idempotencyKey: cmd.IdempotencyKey,
