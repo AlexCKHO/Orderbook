@@ -9,13 +9,13 @@ public class PlaceOrderResult
     string IdempotencyKey { get; }
     CommandType CommandType { get; }
     Status Status { get; }
-    ulong OrderId { get; }
+    ulong? OrderId { get; }
     RejectionCode? RejectionCode { get; }
     string? RejectionReason { get; }
     DateTimeOffset ReceivedAtUtc { get; }
 
     public PlaceOrderResult(string requestId, string correlationId, string idempotencyKey, CommandType commandType,
-        Status status, ulong orderId, RejectionCode? rejectionCode, string? rejectionReason,
+        Status status, ulong? orderId, RejectionCode? rejectionCode, string? rejectionReason,
         DateTimeOffset receivedAtUtc)
     {
         RequestId = requestId;

@@ -4,10 +4,19 @@ namespace Trading.Oms.Infrastructure.Services;
 
 public class MockOrderSequenceAllocator : IOrderSequenceAllocator
 {
-    private Dictionary<uint, uint> orderIds = new Dictionary<uint, uint>();
+    private Dictionary<uint, uint> _orderIds = new Dictionary<uint, uint>();
 
     public Task<uint> AllocateNextSequenceForAccount(uint accountId)
     {
-        return Task.FromResult((uint)1);
+        if (!_orderIds.ContainsKey(accountId))
+        {
+            _orderIds[accountId] = 0;
+            return Task.FromResult((uint)0);
+        }
+        else
+        {
+            var sequence = ++_orderIds[accountId];
+            return Task.FromResult(sequence);
+        }
     }
 }
