@@ -5,11 +5,12 @@ using Trading.Oms.Domain.Enums;
 
 namespace Trading.Oms.Application.Services;
 
-public class CancelOrderCommandHandler
+public class CancelOrderCommandHandler(IMatchingEngineClient matchingEngineClient) : ICancelOrderCommandHandler
 {
-    private IMatchingEngineClient _matchingEngineClient;
+    private readonly IMatchingEngineClient _matchingEngineClient = matchingEngineClient;
 
-    public async Task<CommandAckResult> HandleCancelOrderCommand(CancelOrderCommand cmd)
+
+    public async Task<CommandAckResult> HandleAsync(CancelOrderCommand cmd)
     {
         var (isValid, rejectCode, reason) = _validate(cmd);
 

@@ -6,7 +6,7 @@ using Trading.Oms.Domain.Enums;
 
 namespace Trading.Oms.Application.Services;
 
-public class PlaceOrderCommandHandler
+public class PlaceOrderCommandHandler : IPlaceOrderCommandHandler
 {
     private IOrderSequenceAllocator _orderSequenceAllocator;
     private IOrderIdComposer _orderIdComposer;
