@@ -7,7 +7,7 @@
     </PropertyGroup>
 
     <ItemGroup>
-      <ProjectReference Include="..\src\Trading.Oms.Application\Trading.Oms.Application.csproj" />
+      <ProjectReference Include="..\Trading.Oms.Application\Trading.Oms.Application.csproj" />
       <ProjectReference Include="..\Trading.Oms.Domain\Trading.Oms.Domain.csproj" />
     </ItemGroup>
 

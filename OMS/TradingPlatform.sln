@@ -4,9 +4,9 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Trading.Oms.Api", "src/Trad
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Trading.Oms.Application", "src\Trading.Oms.Application\Trading.Oms.Application.csproj", "{FD096D6D-E5CA-40E7-9D0C-DDC9E503C3AB}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Trading.Oms.Domain", "Trading.Oms.Domain\Trading.Oms.Domain.csproj", "{FE97543C-D5C4-485C-B3BB-BCECCFDD83FF}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Trading.Oms.Domain", "src\Trading.Oms.Domain\Trading.Oms.Domain.csproj", "{FE97543C-D5C4-485C-B3BB-BCECCFDD83FF}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Trading.Oms.Infrastructure", "Trading.Oms.Infrastructure\Trading.Oms.Infrastructure.csproj", "{9F8153F6-0427-4F3B-804D-70C77B2C5C54}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Trading.Oms.Infrastructure", "src\Trading.Oms.Infrastructure\Trading.Oms.Infrastructure.csproj", "{9F8153F6-0427-4F3B-804D-70C77B2C5C54}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

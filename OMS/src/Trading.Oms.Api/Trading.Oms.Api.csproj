@@ -14,7 +14,7 @@
     </ItemGroup>
 
     <ItemGroup>
-      <ProjectReference Include="..\..\Trading.Oms.Infrastructure\Trading.Oms.Infrastructure.csproj" />
+      <ProjectReference Include="..\Trading.Oms.Infrastructure\Trading.Oms.Infrastructure.csproj" />
       <ProjectReference Include="..\Trading.Oms.Application\Trading.Oms.Application.csproj" />
     </ItemGroup>
 
