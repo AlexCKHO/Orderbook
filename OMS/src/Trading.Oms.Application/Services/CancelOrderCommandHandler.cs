@@ -1,4 +1,5 @@
 using Trading.Oms.Application.Commands;
+using Trading.Oms.Application.Interfaces;
 using Trading.Oms.Application.Models;
 using Trading.Oms.Domain.Enums;
 
@@ -6,15 +7,20 @@ namespace Trading.Oms.Application.Services;
 
 public class CancelOrderCommandHandler
 {
-    public async Task<CommandAckResult> HandlePlaceOrderCommand(CancelOrderCommand cancelOrderCommand)
+    private IMatchingEngineClient _matchingEngineClient;
+
+    public async Task<CommandAckResult> HandleCancelOrderCommand(CancelOrderCommand cmd)
     {
-        var (isValid, rejectCode, reason) = _validate(cancelOrderCommand);
+        var (isValid, rejectCode, reason) = _validate(cmd);
 
         if (!isValid)
         {
-            return _createResult(cancelOrderCommand, Status.Rejected, null, rejectCode, reason);
+            return _createResult(cmd, Status.Rejected, rejectCode, reason);
         }
-        
+
+        var result = await _matchingEngineClient.CancelOrderCommand(cmd);
+
+        return _createResult(cmd, result.Status, result.RejectionCode, result.RejectionReason);
     }
 
     private static (bool IsValid, RejectionCode? Code, string? Reason) _validate(CancelOrderCommand cmd)
@@ -32,7 +38,6 @@ public class CancelOrderCommandHandler
     private static CommandAckResult _createResult(
         CancelOrderCommand cmd,
         Status status,
-        ulong? orderId = null,
         RejectionCode? code = null,
         string? reason = null)
     {
@@ -42,7 +47,7 @@ public class CancelOrderCommandHandler
             idempotencyKey: cmd.IdempotencyKey,
             commandType: CommandType.PlaceOrder,
             status: status,
-            orderId: orderId,
+            orderId: cmd.OrderId,
             rejectionCode: code,
             rejectionReason: reason,
             receivedAtUtc: cmd.SubmittedAtUtc

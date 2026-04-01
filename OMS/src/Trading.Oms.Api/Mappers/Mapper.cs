@@ -1,6 +1,7 @@
 using Trading.Oms.Api.Contracts;
 using Trading.Oms.Application.Commands;
 using Trading.Oms.Application.Models;
+using Trading.Oms.Domain.Enums;
 
 namespace Trading.Oms.Api.Mappers;
 
@@ -19,5 +20,39 @@ public class Mapper
             request.Quantity, request.Price, metadata.RequestId, metadata.CorrelationId,
             metadata.IdempotencyKey,
             metadata.SubmittedAtUtc);
+    }
+
+    public static CommandAckResponse MapToPlaceOrderCommandAckResult(
+        PlaceOrderCommand cmd,
+        CommandAckResult result)
+    {
+        return new CommandAckResponse(
+            RequestId: cmd.RequestId,
+            CorrelationId: cmd.CorrelationId,
+            IdempotencyKey: cmd.IdempotencyKey,
+            CommandType: result.CommandType,
+            Status: result.Status,
+            OrderId: result.OrderId,
+            RejectionCode: result.RejectionCode,
+            RejectionReason: result.RejectionReason,
+            ReceivedAtUtc: result.ReceivedAtUtc
+        );
+    }
+
+    public static CommandAckResponse MapToCancelOrderCommandAckResult(
+        CancelOrderCommand cmd,
+        CommandAckResult result)
+    {
+        return new CommandAckResponse(
+            RequestId: cmd.RequestId,
+            CorrelationId: cmd.CorrelationId,
+            IdempotencyKey: cmd.IdempotencyKey,
+            CommandType: result.CommandType,
+            Status: result.Status,
+            OrderId: result.OrderId,
+            RejectionCode: result.RejectionCode,
+            RejectionReason: result.RejectionReason,
+            ReceivedAtUtc: result.ReceivedAtUtc
+        );
     }
 }

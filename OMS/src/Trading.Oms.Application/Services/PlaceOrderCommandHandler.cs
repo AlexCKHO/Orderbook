@@ -10,22 +10,24 @@ public class PlaceOrderCommandHandler
 {
     private IOrderSequenceAllocator _orderSequenceAllocator;
     private IOrderIdComposer _orderIdComposer;
+    private IMatchingEngineClient _matchingEngineClient;
 
 
-    public async Task<CommandAckResult> HandlePlaceOrderCommand(PlaceOrderCommand placeOrderCommand)
+    public async Task<CommandAckResult> HandleAsync(PlaceOrderCommand cmd)
     {
-        var (isValid, rejectCode, reason) = _validate(placeOrderCommand);
+        var (isValid, rejectCode, reason) = _validate(cmd);
 
         if (!isValid)
         {
-            return _createResult(placeOrderCommand, Status.Rejected, null, rejectCode, reason);
+            return _createResult(cmd, Status.Rejected, null, rejectCode, reason);
         }
 
-        var sequence = await _orderSequenceAllocator.AllocateNextSequenceForAccount(placeOrderCommand.AccountId);
-        var orderId = _orderIdComposer.Compose(placeOrderCommand.AccountId, sequence);
 
+        var sequence = await _orderSequenceAllocator.AllocateNextSequenceForAccount(cmd.AccountId);
+        var orderId = _orderIdComposer.Compose(cmd.AccountId, sequence);
 
-        return _createResult(placeOrderCommand, Status.Submitted, orderId);
+        EnginePlaceOrderResult result = await _matchingEngineClient.PlaceOrderCommand(cmd, orderId);
+        return _createResult(cmd, result.Status, orderId, result.RejectionCode, result.RejectionReason);
     }
 
     private static (bool IsValid, RejectionCode? Code, string? Reason) _validate(PlaceOrderCommand cmd)

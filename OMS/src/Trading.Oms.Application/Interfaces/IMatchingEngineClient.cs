@@ -1,6 +1,10 @@
-namespace Trading.Oms.Api.Oms.Application.Interfaces;
+using Trading.Oms.Application.Commands;
+using Trading.Oms.Application.Models;
 
-public class IMatchingEngineClient
+namespace Trading.Oms.Application.Interfaces;
+
+public interface IMatchingEngineClient
 {
-    
+    public Task<EnginePlaceOrderResult> PlaceOrderCommand(PlaceOrderCommand cmd, ulong orderId);
+    public Task<EngineCancelOrderResult> CancelOrderCommand(CancelOrderCommand cmd);
 }

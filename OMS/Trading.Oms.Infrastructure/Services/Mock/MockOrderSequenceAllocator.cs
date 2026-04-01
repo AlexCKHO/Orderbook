@@ -1,6 +1,6 @@
 using Trading.Oms.Application.Interfaces;
 
-namespace Trading.Oms.Infrastructure.Services;
+namespace Trading.Oms.Infrastructure.Services.Mock;
 
 public class MockOrderSequenceAllocator : IOrderSequenceAllocator
 {

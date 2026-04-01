@@ -4,15 +4,15 @@ namespace Trading.Oms.Application.Models;
 
 public class CommandAckResult
 {
-    private string RequestId { get; }
-    string CorrelationId { get; }
-    string IdempotencyKey { get; }
-    CommandType CommandType { get; }
-    Status Status { get; }
-    ulong? OrderId { get; }
-    RejectionCode? RejectionCode { get; }
-    string? RejectionReason { get; }
-    DateTimeOffset ReceivedAtUtc { get; }
+    public string RequestId { get; }
+    public string CorrelationId { get; }
+    public string IdempotencyKey { get; }
+    public CommandType CommandType { get; }
+    public Status Status { get; }
+    public ulong? OrderId { get; }
+    public RejectionCode? RejectionCode { get; }
+    public string? RejectionReason { get; }
+    public DateTimeOffset ReceivedAtUtc { get; }
 
     public CommandAckResult(string requestId, string correlationId, string idempotencyKey, CommandType commandType,
         Status status, ulong? orderId, RejectionCode? rejectionCode, string? rejectionReason,

@@ -8,7 +8,7 @@ public record CommandAckResponse(
     string IdempotencyKey,
     CommandType CommandType,
     Status Status,
-    ulong OrderId,
+    ulong? OrderId,
     RejectionCode? RejectionCode,
     string? RejectionReason,
     DateTimeOffset ReceivedAtUtc
