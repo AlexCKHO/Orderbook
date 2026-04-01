@@ -29,9 +29,9 @@ public class CancelOrderCommandHandler(IMatchingEngineClient matchingEngineClien
         if (cmd.AccountId <= 0)
             return (false, RejectionCode.INVALID_ACCOUNT_ID, "Account ID is invalid.");
         if (cmd.OrderId <= 0)
-            return (false, RejectionCode.INVALID_OREDER_ID, "Order ID is invalid.");
+            return (false, RejectionCode.INVALID_ORDER_ID, "Order ID is invalid.");
         if (cmd.OrderId >> 32 != cmd.AccountId)
-            return (false, RejectionCode.INVALID_OREDER_ID, "Order ID is invalid.");
+            return (false, RejectionCode.INVALID_ORDER_ID, "Order ID is invalid.");
 
         return (true, null, null);
     }
@@ -46,7 +46,7 @@ public class CancelOrderCommandHandler(IMatchingEngineClient matchingEngineClien
             requestId: cmd.RequestId,
             correlationId: cmd.CorrelationId,
             idempotencyKey: cmd.IdempotencyKey,
-            commandType: CommandType.PlaceOrder,
+            commandType: CommandType.CancelOrder,
             status: status,
             orderId: cmd.OrderId,
             rejectionCode: code,

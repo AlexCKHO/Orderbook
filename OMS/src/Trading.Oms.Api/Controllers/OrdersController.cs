@@ -4,25 +4,19 @@ using Trading.Oms.Api.Mappers;
 using Trading.Oms.Application.Commands;
 using Trading.Oms.Application.Interfaces;
 using Trading.Oms.Application.Models;
-using Trading.Oms.Application.Services;
 using Trading.Oms.Domain.Enums;
 
 namespace Trading.Oms.Api.Controllers;
 
 [ApiController]
 [Route("api/orders")]
-public class OrdersController : ControllerBase
+public class OrdersController(
+    IPlaceOrderCommandHandler placeOrderCommandHandler,
+    ICancelOrderCommandHandler cancelOrderCommandHandler) : ControllerBase
 {
-    private IPlaceOrderCommandHandler _placeOrderCommandHandler;
-    private ICancelOrderCommandHandler _cancelOrderCommandHandler;
+    private readonly IPlaceOrderCommandHandler _placeOrderCommandHandler = placeOrderCommandHandler;
+    private readonly ICancelOrderCommandHandler _cancelOrderCommandHandler = cancelOrderCommandHandler;
 
-    public OrdersController(
-        IPlaceOrderCommandHandler placeOrderCommandHandler,
-        ICancelOrderCommandHandler cancelOrderCommandHandler)
-    {
-        _placeOrderCommandHandler = placeOrderCommandHandler;
-        _cancelOrderCommandHandler = cancelOrderCommandHandler;
-    }
 
     [HttpPost]
     public async Task<IActionResult> PlaceOrder([FromBody] PlaceOrderRequest request)
@@ -49,7 +43,7 @@ public class OrdersController : ControllerBase
 
         CommandAckResponse response = Mapper.MapToPlaceOrderCommandAckResult(command, result);
 
-        return response.Status switch
+        return result.Status switch
         {
             Status.Submitted => Ok(response),
             Status.Rejected => BadRequest(response),

@@ -6,11 +6,14 @@ using Trading.Oms.Domain.Enums;
 
 namespace Trading.Oms.Application.Services;
 
-public class PlaceOrderCommandHandler : IPlaceOrderCommandHandler
+public class PlaceOrderCommandHandler(
+    IOrderSequenceAllocator orderSequenceAllocator,
+    IOrderIdComposer orderIdComposer,
+    IMatchingEngineClient matchingEngineClient) : IPlaceOrderCommandHandler
 {
-    private IOrderSequenceAllocator _orderSequenceAllocator;
-    private IOrderIdComposer _orderIdComposer;
-    private IMatchingEngineClient _matchingEngineClient;
+    private readonly IOrderSequenceAllocator _orderSequenceAllocator = orderSequenceAllocator;
+    private readonly IOrderIdComposer _orderIdComposer = orderIdComposer;
+    private readonly IMatchingEngineClient _matchingEngineClient = matchingEngineClient;
 
 
     public async Task<CommandAckResult> HandleAsync(PlaceOrderCommand cmd)
@@ -49,6 +52,9 @@ public class PlaceOrderCommandHandler : IPlaceOrderCommandHandler
 
         if (cmd is { OrderType: OrderType.Limit, Price: null or <= 0 })
             return (false, RejectionCode.PRICE_REQUIRED, "Limit orders must have a positive price.");
+
+        if (cmd is { OrderType: OrderType.Market, Price: not null })
+            return (false, RejectionCode.PRICE_REQUIRED, "Market orders must not have price.");
 
         return (true, null, null);
     }

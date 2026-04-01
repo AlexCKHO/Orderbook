@@ -1,22 +1,20 @@
 using Trading.Oms.Application.Interfaces;
+using System.Collections.Concurrent;
 
 namespace Trading.Oms.Infrastructure.Services.Mock;
 
 public class MockOrderSequenceAllocator : IOrderSequenceAllocator
 {
-    private Dictionary<uint, uint> _orderIds = new Dictionary<uint, uint>();
+    private ConcurrentDictionary<uint, uint> _orderIds = new();
 
     public Task<uint> AllocateNextSequenceForAccount(uint accountId)
     {
-        if (!_orderIds.ContainsKey(accountId))
-        {
-            _orderIds[accountId] = 0;
-            return Task.FromResult((uint)0);
-        }
-        else
-        {
-            var sequence = ++_orderIds[accountId];
-            return Task.FromResult(sequence);
-        }
+        var nextSequence = _orderIds.AddOrUpdate(
+            accountId,
+            1,
+            (key, oldValue) => oldValue + 1
+        );
+
+        return Task.FromResult(nextSequence);
     }
 }
