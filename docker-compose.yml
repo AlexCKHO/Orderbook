@@ -1,6 +1,19 @@
 version: "3.8"
 
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: oms_postgres
+    environment:
+      POSTGRES_USER: oms_user
+      POSTGRES_PASSWORD: oms_password
+      POSTGRES_DB: trading_oms
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
   redpanda:
     image: docker.redpanda.com/redpandadata/redpanda:latest
     container_name: order_matching_broker
@@ -36,4 +49,5 @@ services:
       - redpanda
 
 volumes:
+  postgres_data:
   redpanda-data:
