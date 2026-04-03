@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
-using Trading.Oms.Api.Oms.Infrastructure.Persistence.Entities;
+using Trading.Oms.Infrastructure.Persistence.Entities;
 
-namespace Trading.Oms.Api.Oms.Infrastructure.Persistence;
+namespace Trading.Oms.Infrastructure.Persistence;
 
 public class OmsDbContext : DbContext
 {
@@ -17,6 +17,14 @@ public class OmsDbContext : DbContext
 
         modelBuilder.Entity<IdempotencyRecordEntity>()
             .HasKey(ire => new { ire.Scope, ire.AccountId, ire.IdempotencyKey });
+
+        modelBuilder.Entity<IdempotencyRecordEntity>().Property(ire => ire.Scope).HasMaxLength(100).IsRequired();
+        modelBuilder.Entity<IdempotencyRecordEntity>().Property(ire => ire.IdempotencyKey).HasMaxLength(100)
+            .IsRequired();
+        modelBuilder.Entity<IdempotencyRecordEntity>().Property(ire => ire.RequestId).HasMaxLength(50).IsRequired();
+        modelBuilder.Entity<IdempotencyRecordEntity>().Property(ire => ire.RequestHash).HasMaxLength(64).IsRequired();
+        modelBuilder.Entity<IdempotencyRecordEntity>().Property(ire => ire.State).HasMaxLength(40).IsRequired();
+        modelBuilder.Entity<IdempotencyRecordEntity>().Property(ire => ire.ResponseJson).HasColumnType("jsonb");
 
         modelBuilder.Entity<IdempotencyRecordEntity>()
             .HasIndex(ire => ire.ExpiresAtUtc).HasDatabaseName("ix_idempotency_records_expires_at_utc");
