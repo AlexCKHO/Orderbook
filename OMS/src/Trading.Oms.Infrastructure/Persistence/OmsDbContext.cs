@@ -23,7 +23,8 @@ public class OmsDbContext : DbContext
             .IsRequired();
         modelBuilder.Entity<IdempotencyRecordEntity>().Property(ire => ire.RequestId).HasMaxLength(50).IsRequired();
         modelBuilder.Entity<IdempotencyRecordEntity>().Property(ire => ire.RequestHash).HasMaxLength(64).IsRequired();
-        modelBuilder.Entity<IdempotencyRecordEntity>().Property(ire => ire.State).HasMaxLength(40).IsRequired();
+        modelBuilder.Entity<IdempotencyRecordEntity>().Property(e => e.State).HasConversion<string>().HasMaxLength(40)
+            .IsRequired();
         modelBuilder.Entity<IdempotencyRecordEntity>().Property(ire => ire.ResponseJson).HasColumnType("jsonb");
 
         modelBuilder.Entity<IdempotencyRecordEntity>()

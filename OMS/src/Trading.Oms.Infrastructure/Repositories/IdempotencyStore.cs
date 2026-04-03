@@ -1,4 +1,3 @@
-using System.Data;
 using Microsoft.EntityFrameworkCore;
 using Trading.Oms.Application.Interfaces;
 using Trading.Oms.Application.Models;
@@ -8,11 +7,11 @@ using Trading.Oms.Infrastructure.Persistence.Entities;
 
 namespace Trading.Oms.Infrastructure.Repositories;
 
-public class IdempotencyStore(OmsDbContext dbContext, DbSet<IdempotencyRecordEntity> idempotencyRecords)
+public class IdempotencyStore(OmsDbContext dbContext)
     : IIdempotencyStore
 {
     readonly OmsDbContext _dbContext = dbContext;
-    readonly DbSet<IdempotencyRecordEntity> _idempotencyRecordsSet = idempotencyRecords;
+    readonly DbSet<IdempotencyRecordEntity> _idempotencyRecordsSet = dbContext.Set<IdempotencyRecordEntity>();
 
     public async Task<IdempotencyRecord?> GetAsync(string scope, uint accountId, string idempotencyKey,
         CancellationToken token)
@@ -32,12 +31,12 @@ public class IdempotencyStore(OmsDbContext dbContext, DbSet<IdempotencyRecordEnt
             ResponseStatusCode = result.ResponseStatusCode,
             ResponseJson = result.ResponseJson,
             CreatedAtUtc = result.CreatedAtUtc,
-            CompletedAtUtc = result.CreatedAtUtc,
-            ExpiresAtUtc = result.CreatedAtUtc
+            CompletedAtUtc = result.CompletedAtUtc,
+            ExpiresAtUtc = result.ExpiresAtUtc
         };
     }
 
-    public void ReserveAsync(IdempotencyReservation reservation, CancellationToken token)
+    public async Task ReserveAsync(IdempotencyReservation reservation, CancellationToken token)
     {
         var record = new IdempotencyRecordEntity
         {
@@ -51,10 +50,11 @@ public class IdempotencyStore(OmsDbContext dbContext, DbSet<IdempotencyRecordEnt
             ResponseJson = null,
             CreatedAtUtc = reservation.CreatedAtUtc,
             CompletedAtUtc = null,
-            ExpiresAtUtc = reservation.CreatedAtUtc
+            ExpiresAtUtc = reservation.ExpiresAtUtc
         };
 
         _idempotencyRecordsSet.Add(record);
+        await _dbContext.SaveChangesAsync(token);
     }
 
 
@@ -69,7 +69,7 @@ public class IdempotencyStore(OmsDbContext dbContext, DbSet<IdempotencyRecordEnt
         result.State = IdempotencyStates.Completed;
         result.ResponseStatusCode = responseStatusCode;
         result.ResponseJson = responseJson;
-        result.CreatedAtUtc = completeAtUtc;
+        result.CompletedAtUtc = completeAtUtc;
 
         await _dbContext.SaveChangesAsync(token);
     }

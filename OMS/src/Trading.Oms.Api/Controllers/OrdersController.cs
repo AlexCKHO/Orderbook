@@ -19,7 +19,7 @@ public class OrdersController(
 
 
     [HttpPost]
-    public async Task<IActionResult> PlaceOrder([FromBody] PlaceOrderRequest request)
+    public async Task<IActionResult> PlaceOrder([FromBody] PlaceOrderRequest request, CancellationToken token)
     {
         string? correlationId = Request.Headers["X-Correlation-ID"].FirstOrDefault();
         string? idempotencyKey = Request.Headers["X-Idempotency-Key"].FirstOrDefault();
@@ -39,7 +39,7 @@ public class OrdersController(
 
         PlaceOrderCommand command = Mapper.MapToPlaceOrderCommand(request, metadata);
 
-        CommandAckResult result = await _placeOrderCommandHandler.HandleAsync(command);
+        CommandAckResult result = await _placeOrderCommandHandler.HandleAsync(command, token);
 
         CommandAckResponse response = Mapper.MapToPlaceOrderCommandAckResult(command, result);
 
@@ -52,7 +52,7 @@ public class OrdersController(
     }
 
     [HttpPost("cancel")]
-    public async Task<IActionResult> CancelOrder([FromBody] CancelOrderRequest request)
+    public async Task<IActionResult> CancelOrder([FromBody] CancelOrderRequest request, CancellationToken token)
     {
         string? correlationId = Request.Headers["X-Correlation-ID"].FirstOrDefault();
         string? idempotencyKey = Request.Headers["X-Idempotency-Key"].FirstOrDefault();

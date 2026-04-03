@@ -1,6 +1,6 @@
 namespace Trading.Oms.Application.Models;
 
-public sealed record IdempotencyReservation
+public sealed record IdempotencyReservation 
 {
     public string Scope { get; set; }
     public uint AccountId { get; set; }

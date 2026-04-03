@@ -5,5 +5,5 @@ namespace Trading.Oms.Application.Interfaces;
 
 public interface IPlaceOrderCommandHandler
 {
-    public Task<CommandAckResult> HandleAsync(PlaceOrderCommand cmd);
+    public Task<CommandAckResult> HandleAsync(PlaceOrderCommand cmd, CancellationToken token);
 }

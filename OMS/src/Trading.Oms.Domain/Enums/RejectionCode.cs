@@ -11,4 +11,5 @@ public enum RejectionCode
     INVALID_ORDER_ID = 7,
     INVALID_QUANTITY = 8,
     INVALID_SIDE = 9,
+    INVALID_IDEMPOTENCY_KEY = 10,
 }
