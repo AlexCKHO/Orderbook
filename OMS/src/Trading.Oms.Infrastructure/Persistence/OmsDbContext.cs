@@ -13,9 +13,12 @@ public class OmsDbContext : DbContext
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<IdempotencyRecordEntity>().ToTable("idempotency_records");
+
         modelBuilder.Entity<IdempotencyRecordEntity>()
             .HasKey(ire => new { ire.Scope, ire.AccountId, ire.IdempotencyKey });
-        
-        
+
+        modelBuilder.Entity<IdempotencyRecordEntity>()
+            .HasIndex(ire => ire.ExpiresAtUtc).HasDatabaseName("ix_idempotency_records_expires_at_utc");
     }
 }
