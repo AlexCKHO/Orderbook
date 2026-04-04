@@ -58,7 +58,7 @@ public class IdempotencyStore(OmsDbContext dbContext)
     }
 
 
-    public async Task CompleteAsync(string scope, uint accountId, string idempotencyKey, int responseStatusCode,
+    public async Task CompleteAsync(string scope, uint accountId, string idempotencyKey, int? responseStatusCode,
         string responseJson,
         DateTimeOffset completeAtUtc, CancellationToken token)
     {
@@ -69,6 +69,20 @@ public class IdempotencyStore(OmsDbContext dbContext)
         result.State = IdempotencyStates.Completed;
         result.ResponseStatusCode = responseStatusCode;
         result.ResponseJson = responseJson;
+        result.CompletedAtUtc = completeAtUtc;
+
+        await _dbContext.SaveChangesAsync(token);
+    }
+
+    public async Task FailAsync(string scope, uint accountId, string idempotencyKey, int? responseStatusCode,
+        DateTimeOffset completeAtUtc, CancellationToken token)
+    {
+        var result = await _idempotencyRecordsSet.FindAsync([scope, accountId, idempotencyKey], token);
+
+        if (result is null) throw new Exception("Idempotency Record not found");
+
+        result.State = IdempotencyStates.Failed;
+        result.ResponseStatusCode = responseStatusCode;
         result.CompletedAtUtc = completeAtUtc;
 
         await _dbContext.SaveChangesAsync(token);

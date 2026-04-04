@@ -2,14 +2,15 @@ namespace Trading.Oms.Domain.Enums;
 
 public enum RejectionCode
 {
-    INVALID_SYMBOL = 1,
-    ORDER_NOT_FOUND = 2,
-    INVALID_ORDER_TYPE = 3,
-    PRICE_REQUIRED = 4,
-    ENGINE_UNAVAILABLE = 5,
-    INVALID_ACCOUNT_ID = 6,
-    INVALID_ORDER_ID = 7,
-    INVALID_QUANTITY = 8,
-    INVALID_SIDE = 9,
-    INVALID_IDEMPOTENCY_KEY = 10,
+    InvalidSymbol = 1,
+    OrderNotFound = 2,
+    InvalidOrderType = 3,
+    PriceRequired = 4,
+    EngineUnavailable = 5,
+    InvalidAccountId = 6,
+    InvalidOrderId = 7,
+    InvalidQuantity = 8,
+    InvalidSide = 9,
+    InvalidIdempotencyKey = 10,
+    PriceNotAllowedForMarket = 11
 }

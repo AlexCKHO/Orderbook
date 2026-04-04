@@ -9,7 +9,10 @@ public interface IIdempotencyStore
 
     public Task ReserveAsync(IdempotencyReservation reservation, CancellationToken token);
 
-    public Task CompleteAsync(string scope, uint accountId, string idempotencyKey, int responseStatusCode,
+    public Task CompleteAsync(string scope, uint accountId, string idempotencyKey, int? responseStatusCode,
         string responseJson,
+        DateTimeOffset completeAtUtc, CancellationToken token);
+
+    public Task FailAsync(string scope, uint accountId, string idempotencyKey, int? responseStatusCode,
         DateTimeOffset completeAtUtc, CancellationToken token);
 }

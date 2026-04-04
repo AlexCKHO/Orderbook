@@ -1,7 +1,7 @@
-using System.Formats.Asn1;
 using System.Text.Json;
 using Trading.Oms.Api.Oms.Domain.Interface;
 using Trading.Oms.Application.Commands;
+using Trading.Oms.Application.Exceptions;
 using Trading.Oms.Application.Interfaces;
 using Trading.Oms.Application.Models;
 using Trading.Oms.Domain.Enums;
@@ -22,105 +22,147 @@ public class PlaceOrderCommandHandler(
     private readonly IIdempotencyStore _idempotencyStore = idempotencyStore;
     private readonly IHashingService _hashingService = hashingService;
 
-    public async Task<CommandAckResult> HandleAsync(PlaceOrderCommand cmd, CancellationToken token)
+    public async Task<CommandAckResult?> HandleAsync(PlaceOrderCommand cmd, CancellationToken token)
     {
-        string scope = "place-order";
+        const string scope = "place-order";
 
+        // 1. Initial Validation Guard
         var (isValid, rejectCode, reason) = _validate(cmd);
-
         if (!isValid)
         {
             return _createResult(cmd, Status.Rejected, null, rejectCode, reason);
         }
 
-        var currentCmdHash = _hashingService.HashPlaceOrderCommand(cmd.AccountId, cmd.Symbol, cmd.Side,
-            cmd.OrderType, cmd.Quantity, cmd.Price);
+        // 2. Idempotency Check
+        var currentCmdHash = _hashingService.HashPlaceOrderCommand(
+            cmd.AccountId, cmd.Symbol, cmd.Side, cmd.OrderType, cmd.Quantity, cmd.Price);
 
-        var idempotencyRecord =
-            await _idempotencyStore.GetAsync(scope, cmd.AccountId, cmd.IdempotencyKey, token);
+        var record = await _idempotencyStore.GetAsync(scope, cmd.AccountId, cmd.IdempotencyKey, token);
 
-        var currentTime = DateTimeOffset.UtcNow;
-
-        if (idempotencyRecord is not null)
+        if (record is not null)
         {
-            // Order already being processed
-            if (idempotencyRecord.State == IdempotencyStates.InProgress)
-            {
-                throw new  Exception("Duplicate order requested.");
-            }
-            // Malicious attack
-            else if (!currentCmdHash.Equals(idempotencyRecord.RequestHash))
-            {
-                throw new Exception("Idempotency key already used with different payload");
-            }
-            // Duplicate request
-            else if (currentCmdHash.Equals(idempotencyRecord.RequestHash))
-            {
-                var jsonString = idempotencyRecord.ResponseJson;
-
-                var replayResult = JsonSerializer.Deserialize<CommandAckResult>(jsonString);
-
-                return replayResult;
-            }
+            return _handleExistingIdempotency(record, currentCmdHash);
         }
 
-        var reserve = new IdempotencyReservation();
-        reserve.Scope = scope;
-        reserve.AccountId = cmd.AccountId;
-        reserve.IdempotencyKey = cmd.IdempotencyKey;
-        reserve.RequestId = cmd.RequestId;
-        reserve.RequestHash = currentCmdHash;
-        reserve.CreatedAtUtc = currentTime;
-        reserve.ExpiresAtUtc = currentTime.AddHours(24);
+        // 3. Reservation
+        var reserve = new IdempotencyReservation
+        {
+            Scope = scope,
+            AccountId = cmd.AccountId,
+            IdempotencyKey = cmd.IdempotencyKey,
+            RequestId = cmd.RequestId,
+            RequestHash = currentCmdHash,
+            CreatedAtUtc = DateTimeOffset.UtcNow,
+            ExpiresAtUtc = DateTimeOffset.UtcNow.AddHours(24)
+        };
+
+        try
+        {
+            await _idempotencyStore.ReserveAsync(reserve, token);
+        }
+        catch
+        {
+            throw;
+        }
 
 
-        await _idempotencyStore.ReserveAsync(reserve, token);
-
+        // 4. Execution
 
         var sequence = await _orderSequenceAllocator.AllocateNextSequenceForAccount(cmd.AccountId);
         var orderId = _orderIdComposer.Compose(cmd.AccountId, sequence);
 
-        EnginePlaceOrderResult result = await _matchingEngineClient.PlaceOrderCommand(cmd, orderId);
 
-        var finalResult = _createResult(cmd, result.Status, orderId, result.RejectionCode, result.RejectionReason);
+        try
+        {
+            var engineResult = await _matchingEngineClient.PlaceOrderCommand(cmd, orderId);
 
-        var resultJson = JsonSerializer.Serialize(finalResult);
 
-        await _idempotencyStore.CompleteAsync(reserve.Scope, reserve.AccountId, reserve.IdempotencyKey, null,
-            resultJson,
-            DateTimeOffset.UtcNow, token
-        );
+            var finalResult = _createResult(cmd, engineResult.Status, orderId, engineResult.RejectionCode,
+                engineResult.RejectionReason);
 
-        return finalResult;
+            // 5. Completion
+            await _idempotencyStore.CompleteAsync(
+                reserve.Scope,
+                reserve.AccountId,
+                reserve.IdempotencyKey,
+                _mapStatusToStatusCode(finalResult.Status),
+                JsonSerializer.Serialize(finalResult),
+                DateTimeOffset.UtcNow,
+                token
+            );
+
+            return finalResult;
+        }
+        catch
+        {
+            await _idempotencyStore.FailAsync(reserve.Scope,
+                reserve.AccountId,
+                reserve.IdempotencyKey,
+                _mapStatusToStatusCode(Status.Unknown),
+                DateTimeOffset.UtcNow,
+                token);
+
+            throw;
+        }
     }
+
+    private static CommandAckResult _handleExistingIdempotency(IdempotencyRecord record, string currentHash)
+    {
+        if (record.State == IdempotencyStates.InProgress)
+        {
+            throw new IdempotencyConflictException("Order is currently being processed.");
+        }
+
+        if (!currentHash.Equals(record.RequestHash))
+        {
+            throw new IdempotencyConflictException(
+                "Idempotency key reused with a different payload (possible malicious attack).");
+        }
+
+        if (string.IsNullOrWhiteSpace(record.ResponseJson))
+        {
+            throw new IdempotencyConflictException($"Record found in {record.State} state but missing response data.");
+        }
+
+        return JsonSerializer.Deserialize<CommandAckResult>(record.ResponseJson)
+               ?? throw new IdempotencyConflictException("Failed to deserialize the cached idempotency result.");
+    }
+
+    private static int _mapStatusToStatusCode(Status status) => status switch
+    {
+        Status.Submitted => 200,
+        Status.Rejected => 400,
+        _ => 500
+    };
 
     private static (bool IsValid, RejectionCode? Code, string? Reason) _validate(PlaceOrderCommand cmd
     )
     {
         if (cmd.AccountId <= 0)
-            return (false, RejectionCode.INVALID_ACCOUNT_ID, "Account ID must be positive.");
+            return (false, RejectionCode.InvalidAccountId, "Account ID must be positive.");
 
-        if (cmd is { IdempotencyKey: null })
-            return (false, RejectionCode.INVALID_IDEMPOTENCY_KEY, "IdempotencyKey must not be null.");
+// Simplified: catches null, empty, and whitespace in one go
+        if (string.IsNullOrWhiteSpace(cmd.IdempotencyKey))
+            return (false, RejectionCode.InvalidIdempotencyKey, "IdempotencyKey is required and cannot be empty.");
 
         if (!TradingOptions.Symbols.Contains(cmd.Symbol))
-            return (false, RejectionCode.INVALID_SYMBOL, $"Symbol {cmd.Symbol} is not supported.");
+            return (false, RejectionCode.InvalidSymbol, $"Symbol {cmd.Symbol} is not supported.");
 
         if (cmd.Quantity <= 0)
-            return (false, RejectionCode.INVALID_QUANTITY, "Quantity must be greater than zero.");
+            return (false, RejectionCode.InvalidQuantity, "Quantity must be greater than zero.");
 
         if (cmd is { Side: not (Side.Ask or Side.Bid) })
-            return (false, RejectionCode.INVALID_SIDE, "Side must be either Ask or Bid.");
+            return (false, RejectionCode.InvalidSide, "Side must be either Ask or Bid.");
 
         if (cmd is { OrderType: not (OrderType.Limit or OrderType.Market) })
-            return (false, RejectionCode.INVALID_ORDER_TYPE, "Order type must be either Limit or Market.");
+            return (false, RejectionCode.InvalidOrderType, "Order type must be either Limit or Market.");
 
+// Using property patterns for concise multi-condition checks
         if (cmd is { OrderType: OrderType.Limit, Price: null or <= 0 })
-            return (false, RejectionCode.PRICE_REQUIRED, "Limit orders must have a positive price.");
+            return (false, RejectionCode.PriceRequired, "Limit orders must have a positive price.");
 
         if (cmd is { OrderType: OrderType.Market, Price: not null })
-            return (false, RejectionCode.PRICE_REQUIRED, "Market orders must not have price.");
-
+            return (false, RejectionCode.PriceNotAllowedForMarket, "Market orders must not have a price.");
         return (true, null, null);
     }
 

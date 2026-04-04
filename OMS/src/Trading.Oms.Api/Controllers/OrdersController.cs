@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Trading.Oms.Api.Contracts;
 using Trading.Oms.Api.Mappers;
 using Trading.Oms.Application.Commands;
+using Trading.Oms.Application.Exceptions;
 using Trading.Oms.Application.Interfaces;
 using Trading.Oms.Application.Models;
 using Trading.Oms.Domain.Enums;
@@ -36,19 +37,25 @@ public class OrdersController(
             submittedAtUtc: DateTimeOffset.UtcNow
         );
 
-
-        PlaceOrderCommand command = Mapper.MapToPlaceOrderCommand(request, metadata);
-
-        CommandAckResult result = await _placeOrderCommandHandler.HandleAsync(command, token);
-
-        CommandAckResponse response = Mapper.MapToPlaceOrderCommandAckResult(command, result);
-
-        return result.Status switch
+        try
         {
-            Status.Submitted => Ok(response),
-            Status.Rejected => BadRequest(response),
-            _ => StatusCode(500, "Unexpected command Status")
-        };
+            PlaceOrderCommand command = Mapper.MapToPlaceOrderCommand(request, metadata);
+
+            CommandAckResult result = await _placeOrderCommandHandler.HandleAsync(command, token);
+
+            CommandAckResponse response = Mapper.MapToPlaceOrderCommandAckResult(command, result);
+
+            return result.Status switch
+            {
+                Status.Submitted => Ok(response),
+                Status.Rejected => BadRequest(response),
+                _ => StatusCode(500, "Unexpected command Status")
+            };
+        }
+        catch (IdempotencyConflictException idempotencyConflictException)
+        {
+            return StatusCode(StatusCodes.Status409Conflict, idempotencyConflictException);
+        }
     }
 
     [HttpPost("cancel")]

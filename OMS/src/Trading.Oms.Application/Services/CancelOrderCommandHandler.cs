@@ -27,11 +27,11 @@ public class CancelOrderCommandHandler(IMatchingEngineClient matchingEngineClien
     private static (bool IsValid, RejectionCode? Code, string? Reason) _validate(CancelOrderCommand cmd)
     {
         if (cmd.AccountId <= 0)
-            return (false, RejectionCode.INVALID_ACCOUNT_ID, "Account ID is invalid.");
+            return (false, RejectionCode.InvalidAccountId, "Account ID is invalid.");
         if (cmd.OrderId <= 0)
-            return (false, RejectionCode.INVALID_ORDER_ID, "Order ID is invalid.");
+            return (false, RejectionCode.InvalidOrderId, "Order ID is invalid.");
         if (cmd.OrderId >> 32 != cmd.AccountId)
-            return (false, RejectionCode.INVALID_ORDER_ID, "Order ID is invalid.");
+            return (false, RejectionCode.InvalidOrderId, "Order ID is invalid.");
 
         return (true, null, null);
     }
