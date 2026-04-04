@@ -12,6 +12,7 @@ public class CommandAckResult
     public ulong? OrderId { get; }
     public RejectionCode? RejectionCode { get; }
     public string? RejectionReason { get; }
+
     public DateTimeOffset ReceivedAtUtc { get; }
 
     public CommandAckResult(string requestId, string correlationId, string idempotencyKey, CommandType commandType,

@@ -22,9 +22,14 @@ public class PlaceOrderCommandHandler(
     private readonly IIdempotencyStore _idempotencyStore = idempotencyStore;
     private readonly IHashingService _hashingService = hashingService;
 
-    public async Task<CommandAckResult?> HandleAsync(PlaceOrderCommand cmd, CancellationToken token)
+    public async Task<CommandAckResult> HandleAsync(PlaceOrderCommand cmd, CancellationToken token)
     {
-        const string scope = "place-order";
+        // not valid → return result
+        // replay → return result
+        // success → return result
+        // exception → throw
+
+        const string scope = "POST:/api/orders";
 
         // 1. Initial Validation Guard
         var (isValid, rejectCode, reason) = _validate(cmd);
@@ -56,24 +61,17 @@ public class PlaceOrderCommandHandler(
             ExpiresAtUtc = DateTimeOffset.UtcNow.AddHours(24)
         };
 
-        try
-        {
-            await _idempotencyStore.ReserveAsync(reserve, token);
-        }
-        catch
-        {
-            throw;
-        }
+
+        await _idempotencyStore.ReserveAsync(reserve, token);
 
 
         // 4. Execution
 
-        var sequence = await _orderSequenceAllocator.AllocateNextSequenceForAccount(cmd.AccountId);
-        var orderId = _orderIdComposer.Compose(cmd.AccountId, sequence);
-
-
         try
         {
+            var sequence = await _orderSequenceAllocator.AllocateNextSequenceForAccount(cmd.AccountId);
+            var orderId = _orderIdComposer.Compose(cmd.AccountId, sequence);
+
             var engineResult = await _matchingEngineClient.PlaceOrderCommand(cmd, orderId);
 
 
@@ -93,7 +91,7 @@ public class PlaceOrderCommandHandler(
 
             return finalResult;
         }
-        catch
+        catch(Exception ex)
         {
             await _idempotencyStore.FailAsync(reserve.Scope,
                 reserve.AccountId,
@@ -108,15 +106,28 @@ public class PlaceOrderCommandHandler(
 
     private static CommandAckResult _handleExistingIdempotency(IdempotencyRecord record, string currentHash)
     {
+        if (!currentHash.Equals(record.RequestHash))
+        {
+            // possible malicious attack
+            throw new IdempotencyConflictException(
+                "Idempotency key reused with a different payload.");
+        }
+
         if (record.State == IdempotencyStates.InProgress)
         {
             throw new IdempotencyConflictException("Order is currently being processed.");
         }
 
-        if (!currentHash.Equals(record.RequestHash))
+        if (record.State == IdempotencyStates.Failed)
         {
-            throw new IdempotencyConflictException(
-                "Idempotency key reused with a different payload (possible malicious attack).");
+            throw new IdempotencyConflictException("Previous request failed; retry with a new idempotency key.");
+        }
+
+        if (record.State == IdempotencyStates.Completed)
+        {
+            return string.IsNullOrWhiteSpace(record.ResponseJson)
+                ? JsonSerializer.Deserialize<CommandAckResult>(record.ResponseJson)
+                : throw new IdempotencyConflictException("Failed to deserialize the cached idempotency result.");
         }
 
         if (string.IsNullOrWhiteSpace(record.ResponseJson))
@@ -124,8 +135,7 @@ public class PlaceOrderCommandHandler(
             throw new IdempotencyConflictException($"Record found in {record.State} state but missing response data.");
         }
 
-        return JsonSerializer.Deserialize<CommandAckResult>(record.ResponseJson)
-               ?? throw new IdempotencyConflictException("Failed to deserialize the cached idempotency result.");
+        throw new IdempotencyConflictException($"Unknown idempotency state: {record.State}");
     }
 
     private static int _mapStatusToStatusCode(Status status) => status switch

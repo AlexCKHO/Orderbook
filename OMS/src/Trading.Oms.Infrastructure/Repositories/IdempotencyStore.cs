@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Trading.Oms.Application.Exceptions;
 using Trading.Oms.Application.Interfaces;
 using Trading.Oms.Application.Models;
 using Trading.Oms.Domain.Enums;
@@ -53,8 +54,16 @@ public class IdempotencyStore(OmsDbContext dbContext)
             ExpiresAtUtc = reservation.ExpiresAtUtc
         };
 
-        _idempotencyRecordsSet.Add(record);
-        await _dbContext.SaveChangesAsync(token);
+        try
+        {
+            _idempotencyRecordsSet.Add(record);
+
+            await _dbContext.SaveChangesAsync(token);
+        }
+        catch (DbUpdateException ex)
+        {
+            throw new IdempotencyConflictException("Idempotency key reused with a different payload.");
+        }
     }
 
 
