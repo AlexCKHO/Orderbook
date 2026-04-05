@@ -15,6 +15,8 @@ public class OmsDbContext : DbContext
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        
+        
         modelBuilder.Entity<IdempotencyRecordEntity>().ToTable("idempotency_records");
 
         modelBuilder.Entity<IdempotencyRecordEntity>()
