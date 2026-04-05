@@ -1,8 +1,105 @@
 @OMS_HostAddress = http://localhost:5059
+@idempotencyKey = test-key-001
+@correlationId = corr-001
 
-GET {{OMS_HostAddress}}/health/
+### Health
+GET {{OMS_HostAddress}}/health
 Accept: application/json
 
-POST {{OMS_HostAddress}}/api/order/
+### Place Order - valid
+POST {{OMS_HostAddress}}/api/orders
 Accept: application/json
-###
+Content-Type: application/json
+X-Idempotency-Key: {{idempotencyKey}}
+X-Correlation-ID: {{correlationId}}
+
+{
+  "accountId": 32,
+  "symbol": "BTC-USD",
+  "side": 1,
+  "orderType": 1,
+  "quantity": 100,
+  "price": 50000
+}
+
+### Place Order - replay same payload same key
+POST {{OMS_HostAddress}}/api/orders
+Accept: application/json
+Content-Type: application/json
+X-Idempotency-Key: {{idempotencyKey}}
+X-Correlation-ID: {{correlationId}}
+
+{
+  "accountId": 32,
+  "symbol": "BTC-USD",
+  "side": 1,
+  "orderType": 1,
+  "quantity": 100,
+  "price": 50000
+}
+
+### Place Order - same key different payload -> should conflict
+POST {{OMS_HostAddress}}/api/orders
+Accept: application/json
+Content-Type: application/json
+X-Idempotency-Key: {{idempotencyKey}}
+X-Correlation-ID: {{correlationId}}
+
+{
+  "accountId": 32,
+  "symbol": "ETH-USD",
+  "side": 1,
+  "orderType": 1,
+  "quantity": 100,
+  "price": 50000
+}
+
+### Place Order - missing idempotency key -> should 400
+POST {{OMS_HostAddress}}/api/orders
+Accept: application/json
+Content-Type: application/json
+
+{
+  "accountId": 32,
+  "symbol": "BTC-USD",
+  "side": 1,
+  "orderType": 1,
+  "quantity": 100,
+  "price": 50000
+}
+
+### Cancel Order - valid
+POST {{OMS_HostAddress}}/api/orders/cancel
+Accept: application/json
+Content-Type: application/json
+X-Idempotency-Key: cancel-key-001
+X-Correlation-ID: corr-cancel-001
+
+{
+  "accountId": 32,
+  "orderId": 137438953473
+}
+
+### Cancel Order - replay same payload same key
+POST {{OMS_HostAddress}}/api/orders/cancel
+Accept: application/json
+Content-Type: application/json
+X-Idempotency-Key: cancel-key-001
+X-Correlation-ID: corr-cancel-001
+
+{
+  "accountId": 32,
+  "orderId": 137438953473
+}
+
+### Cancel Order - same key different payload -> should conflict
+POST {{OMS_HostAddress}}/api/orders/cancel
+Accept: application/json
+Content-Type: application/json
+X-Idempotency-Key: cancel-key-001
+X-Correlation-ID: corr-cancel-001
+
+{
+  "accountId": 32,
+  "orderId": 137438953474
+}

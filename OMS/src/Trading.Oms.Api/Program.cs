@@ -1,8 +1,12 @@
+using Microsoft.EntityFrameworkCore;
 using Trading.Oms.Api.Contracts;
 using Trading.Oms.Api.Oms.Domain.Interface;
 using Trading.Oms.Api.Oms.Domain.Services;
 using Trading.Oms.Application.Interfaces;
 using Trading.Oms.Application.Services;
+using Trading.Oms.Infrastructure.Persistence;
+using Trading.Oms.Infrastructure.Repositories;
+using Trading.Oms.Infrastructure.Services;
 using Trading.Oms.Infrastructure.Services.Mock;
 
 namespace Trading.Oms.Api;
@@ -13,6 +17,11 @@ public class Program
     {
         var builder = WebApplication.CreateBuilder(args);
 
+        string connString = builder.Configuration.GetConnectionString("OmsDatabase");
+
+        // Add services to the container.
+        builder.Services.AddControllers();
+
         // Add services to the container.
         builder.Services.AddAuthorization();
 
@@ -21,11 +30,15 @@ public class Program
         builder.Services.AddSwaggerGen();
         builder.Services.AddControllers();
 
-        builder.Services.AddScoped<IPlaceOrderCommandHandler, PlaceOrderCommandHandler>();
-        builder.Services.AddScoped<ICancelOrderCommandHandler, CancelOrderCommandHandler>();
+        builder.Services.AddDbContext<OmsDbContext>(options => options.UseNpgsql(connString));
         builder.Services.AddScoped<IOrderSequenceAllocator, MockOrderSequenceAllocator>();
         builder.Services.AddScoped<IOrderIdComposer, OrderIdComposer>();
         builder.Services.AddScoped<IMatchingEngineClient, MockMatchingEngineClient>();
+        builder.Services.AddScoped<IIdempotencyStore, IdempotencyStore>();
+        builder.Services.AddScoped<IHashingService, Sha256HashingService>();
+        builder.Services.AddScoped<IPlaceOrderCommandHandler, PlaceOrderCommandHandler>();
+        builder.Services.AddScoped<ICancelOrderCommandHandler, CancelOrderCommandHandler>();
+
 
         var app = builder.Build();
         // Configure the HTTP request pipeline.
