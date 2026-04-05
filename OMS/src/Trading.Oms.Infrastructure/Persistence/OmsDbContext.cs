@@ -10,7 +10,7 @@ public class OmsDbContext : DbContext
     }
 
 
-    // public DbSet<CommandAuditEntity> command_audits { get; set; }
+     public DbSet<CommandAuditEntity> command_audits { get; set; }
     public DbSet<IdempotencyRecordEntity> idempotency_records { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
