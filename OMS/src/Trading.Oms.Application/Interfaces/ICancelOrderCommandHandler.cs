@@ -5,5 +5,5 @@ namespace Trading.Oms.Application.Interfaces;
 
 public interface ICancelOrderCommandHandler
 {
-    public Task<CommandAckResult> HandleAsync(CancelOrderCommand cmd);
+    public Task<CommandAckResult> HandleAsync(CancelOrderCommand cmd, CancellationToken token);
 }

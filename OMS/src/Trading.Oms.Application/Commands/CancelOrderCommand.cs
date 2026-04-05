@@ -1,3 +1,6 @@
+using Trading.Oms.Application.Interfaces;
+using Trading.Oms.Application.Models;
+
 namespace Trading.Oms.Application.Commands;
 
 public class CancelOrderCommand

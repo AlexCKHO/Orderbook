@@ -62,7 +62,7 @@ public class IdempotencyStore(OmsDbContext dbContext)
         }
         catch (DbUpdateException ex)
         {
-            throw new IdempotencyConflictException("Idempotency key reused with a different payload.");
+            throw new IdempotencyConflictException($"Duplicate Idempotency key {ex.Message}");
         }
     }
 

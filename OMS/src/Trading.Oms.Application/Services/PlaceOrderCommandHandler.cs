@@ -60,8 +60,6 @@ public class PlaceOrderCommandHandler(
             CreatedAtUtc = DateTimeOffset.UtcNow,
             ExpiresAtUtc = DateTimeOffset.UtcNow.AddHours(24)
         };
-
-
         await _idempotencyStore.ReserveAsync(reserve, token);
 
 
@@ -91,7 +89,7 @@ public class PlaceOrderCommandHandler(
 
             return finalResult;
         }
-        catch(Exception ex)
+        catch (Exception)
         {
             await _idempotencyStore.FailAsync(reserve.Scope,
                 reserve.AccountId,
@@ -125,9 +123,14 @@ public class PlaceOrderCommandHandler(
 
         if (record.State == IdempotencyStates.Completed)
         {
-            return string.IsNullOrWhiteSpace(record.ResponseJson)
-                ? JsonSerializer.Deserialize<CommandAckResult>(record.ResponseJson)
-                : throw new IdempotencyConflictException("Failed to deserialize the cached idempotency result.");
+            if (string.IsNullOrWhiteSpace(record.ResponseJson))
+            {
+                throw new IdempotencyConflictException(
+                    "Failed to deserialize the cached idempotency result.");
+            }
+
+            return JsonSerializer
+                .Deserialize<CommandAckResult>(record.ResponseJson);
         }
 
         if (string.IsNullOrWhiteSpace(record.ResponseJson))

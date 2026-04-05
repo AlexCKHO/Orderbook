@@ -54,7 +54,7 @@ public class OrdersController(
         }
         catch (IdempotencyConflictException idempotencyConflictException)
         {
-            return StatusCode(StatusCodes.Status409Conflict, idempotencyConflictException);
+            return StatusCode(StatusCodes.Status409Conflict, idempotencyConflictException.Message);
         }
     }
 
@@ -76,18 +76,24 @@ public class OrdersController(
             submittedAtUtc: DateTimeOffset.UtcNow
         );
 
-
-        CancelOrderCommand command = Mapper.MapToCancelOrderCommand(request, metadata);
-
-        CommandAckResult result = await _cancelOrderCommandHandler.HandleAsync(command);
-
-        CommandAckResponse response = Mapper.MapToCancelOrderCommandAckResult(command, result);
-
-        return result.Status switch
+        try
         {
-            Status.Submitted => Ok(response),
-            Status.Rejected => BadRequest(response),
-            _ => StatusCode(500, "Unexpected command Status")
-        };
+            CancelOrderCommand command = Mapper.MapToCancelOrderCommand(request, metadata);
+
+            CommandAckResult result = await _cancelOrderCommandHandler.HandleAsync(command, token);
+
+            CommandAckResponse response = Mapper.MapToCancelOrderCommandAckResult(command, result);
+
+            return result.Status switch
+            {
+                Status.Submitted => Ok(response),
+                Status.Rejected => BadRequest(response),
+                _ => StatusCode(500, "Unexpected command Status")
+            };
+        }
+        catch (IdempotencyConflictException idempotencyConflictException)
+        {
+            return StatusCode(StatusCodes.Status409Conflict, idempotencyConflictException.Message);
+        }
     }
 }

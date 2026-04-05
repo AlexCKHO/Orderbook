@@ -29,4 +29,19 @@ public class Sha256HashingService : IHashingService
 
         return hashedRequest;
     }
+
+    public string HashCancelOrderCommand(uint accountId, ulong orderId)
+    {
+        var canonicalObject = new
+        {
+            AccountId = accountId,
+            OrderId = orderId
+        };
+
+        string payloadString = JsonSerializer.Serialize(canonicalObject);
+
+        string hashedRequest = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payloadString)));
+
+        return hashedRequest;
+    }
 }
