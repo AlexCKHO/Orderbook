@@ -9,6 +9,8 @@ public class OmsDbContext : DbContext
     {
     }
 
+
+    // public DbSet<CommandAuditEntity> command_audits { get; set; }
     public DbSet<IdempotencyRecordEntity> idempotency_records { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -29,5 +31,8 @@ public class OmsDbContext : DbContext
 
         modelBuilder.Entity<IdempotencyRecordEntity>()
             .HasIndex(ire => ire.ExpiresAtUtc).HasDatabaseName("ix_idempotency_records_expires_at_utc");
+        
+        
+        
     }
 }
