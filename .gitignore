@@ -1,6 +1,36 @@
 # ===========================
+# .NET / C# (Core, 5, 6, 7, 8+)
+# ===========================
+[Bb]in/
+[Oo]bj/
+[Rr]elease/
+[Dd]ebug/
+
+# Test results
+[Tt]est[Rr]esults/
+*.trx
+*.coverage
+
+# User-specific files
+*.user
+*.userosscache
+*.sln.docstates
+*.suo
+
+# Secret handling
+appsettings.Development.json
+secrets.json
+
+# ===========================
+# EF Core & Migrations
+# ===========================
+*.sql
+*.efmigrate.log
+
+# ===========================
 # Rust Ignored Files
 # ===========================
+
 # Critical Fix: Removed leading "/" to ensure target/ folders in subdirectories are ignored
 target/
 *.env
@@ -8,28 +38,12 @@ target/
 # Backup files
 **/*.rs.bk
 
+
+
 # Profiling and trace files
 *.json.gz
 *.prof
 *.perf
-
-
-# ===========================
-# C# / .NET Ignored Files
-# ===========================
-# Local application settings
-appsettings.local.json
-
-# Ignore compiled Binary and Object files (in any directory depth)
-[Bb]in/
-[Oo]bj/
-
-# Visual Studio / Rider user-specific configuration files (should not be uploaded)
-.vs/
-*.user
-*.suo
-_UpgradeReport_Files/
-[Pp]ackages/
 
 # ===========================
 # IDE Settings (Rider / VS Code)
@@ -37,13 +51,24 @@ _UpgradeReport_Files/
 .idea/
 *.iml
 .vscode/
+.vs/
+_UpgradeReport_Files/
+
+# Rider Specific
+.idea/**/workspace.xml
+.idea/**/tasks.xml
+.idea/**/usage.statistics.xml
+.idea/**/dictionaries
+.idea/**/shelf
 
 # ===========================
-# Operating System Files
+# Operating System & Others
 # ===========================
-# Mac
 .DS_Store
-
-# Windows
 Thumbs.db
 Desktop.ini
+*.log
+*.env
+*.prof
+*.perf
+*.json.gz
