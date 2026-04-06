@@ -6,12 +6,12 @@ namespace Trading.Oms.Infrastructure.Persistence.Entities;
 public class CommandAuditEntity
 
 {
-    public ulong Id { get; set; }
+    public long Id { get; set; }
     public required string RequestId { get; set; }
     public required string CorrelationId { get; set; }
     public required string IdempotencyKey { get; set; }
     public required uint AccountId { get; set; }
-    public ulong? OrderId { get; set; }
+    public long? OrderId { get; set; }
     public required CommandType CommandType { get; set; }
     public required string PayloadHash { get; set; }
     public required string RequestPayloadJson { get; set; }
