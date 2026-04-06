@@ -91,6 +91,8 @@ namespace Trading.Oms.Infrastructure.Migrations
                     b.HasIndex("RequestId")
                         .IsUnique();
 
+                    b.HasIndex("RequestId", "CorrelationId", "AccountId", "SubmittedAtUtc");
+
                     b.ToTable("command_audits", (string)null);
                 });
 

@@ -12,7 +12,7 @@ using Trading.Oms.Infrastructure.Persistence;
 namespace Trading.Oms.Infrastructure.Migrations
 {
     [DbContext(typeof(OmsDbContext))]
-    [Migration("20260406144539_Initial_Oms_Schema")]
+    [Migration("20260406145612_Initial_Oms_Schema")]
     partial class Initial_Oms_Schema
     {
         /// <inheritdoc />
@@ -93,6 +93,8 @@ namespace Trading.Oms.Infrastructure.Migrations
 
                     b.HasIndex("RequestId")
                         .IsUnique();
+
+                    b.HasIndex("RequestId", "CorrelationId", "AccountId", "SubmittedAtUtc");
 
                     b.ToTable("command_audits", (string)null);
                 });

@@ -37,7 +37,7 @@ public class OmsDbContext : DbContext
         {
             entity.ToTable("command_audits");
 
-            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => new { e.RequestId, e.CorrelationId, e.AccountId, e.SubmittedAtUtc });
             entity.Property(e => e.Id)
                 .UseIdentityByDefaultColumn();
 

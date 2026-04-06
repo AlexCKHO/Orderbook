@@ -70,6 +70,11 @@ namespace Trading.Oms.Infrastructure.Migrations
                 unique: true);
 
             migrationBuilder.CreateIndex(
+                name: "IX_command_audits_RequestId_CorrelationId_AccountId_SubmittedA~",
+                table: "command_audits",
+                columns: new[] { "RequestId", "CorrelationId", "AccountId", "SubmittedAtUtc" });
+
+            migrationBuilder.CreateIndex(
                 name: "ix_idempotency_records_expires_at_utc",
                 table: "idempotency_records",
                 column: "ExpiresAtUtc");
