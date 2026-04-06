@@ -10,31 +10,59 @@ public class OmsDbContext : DbContext
     }
 
 
-     public DbSet<CommandAuditEntity> command_audits { get; set; }
+    public DbSet<CommandAuditEntity> command_audits { get; set; }
     public DbSet<IdempotencyRecordEntity> idempotency_records { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        
-        
-        modelBuilder.Entity<IdempotencyRecordEntity>().ToTable("idempotency_records");
+        modelBuilder.Entity<IdempotencyRecordEntity>(entity =>
+        {
+            entity.ToTable("idempotency_records");
 
-        modelBuilder.Entity<IdempotencyRecordEntity>()
-            .HasKey(ire => new { ire.Scope, ire.AccountId, ire.IdempotencyKey });
+            entity.HasKey(e => new { e.Scope, e.AccountId, e.IdempotencyKey });
+            entity.Property(e => e.Scope).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.IdempotencyKey).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.RequestId).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.RequestHash).HasMaxLength(64).IsRequired();
 
-        modelBuilder.Entity<IdempotencyRecordEntity>().Property(ire => ire.Scope).HasMaxLength(100).IsRequired();
-        modelBuilder.Entity<IdempotencyRecordEntity>().Property(ire => ire.IdempotencyKey).HasMaxLength(100)
-            .IsRequired();
-        modelBuilder.Entity<IdempotencyRecordEntity>().Property(ire => ire.RequestId).HasMaxLength(50).IsRequired();
-        modelBuilder.Entity<IdempotencyRecordEntity>().Property(ire => ire.RequestHash).HasMaxLength(64).IsRequired();
-        modelBuilder.Entity<IdempotencyRecordEntity>().Property(e => e.State).HasConversion<string>().HasMaxLength(40)
-            .IsRequired();
-        modelBuilder.Entity<IdempotencyRecordEntity>().Property(ire => ire.ResponseJson).HasColumnType("jsonb");
+            entity.Property(e => e.State)
+                .HasConversion<string>()
+                .HasMaxLength(40)
+                .IsRequired();
 
-        modelBuilder.Entity<IdempotencyRecordEntity>()
-            .HasIndex(ire => ire.ExpiresAtUtc).HasDatabaseName("ix_idempotency_records_expires_at_utc");
-        
-        
-        
+            entity.Property(e => e.ResponseJson) .HasColumnType("jsonb");
+            entity.HasIndex(e => e.ExpiresAtUtc) .HasDatabaseName("ix_idempotency_records_expires_at_utc");
+        });
+
+        modelBuilder.Entity<CommandAuditEntity>(entity =>
+        {
+            entity.ToTable("command_audits");
+
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id)
+                .UseIdentityByDefaultColumn();
+
+            entity.Property(e => e.RequestId).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.CorrelationId).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.IdempotencyKey).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.AccountId).IsRequired();
+            entity.Property(e => e.PayloadHash).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.CommandType)
+                .HasConversion<string>()
+                .HasMaxLength(40)
+                .IsRequired();
+            entity.Property(e => e.RequestPayloadJson).HasColumnType("jsonb").IsRequired();
+            entity.Property(e => e.Status)
+                .HasConversion<string>()
+                .HasMaxLength(40)
+                .IsRequired();
+            entity.Property(e => e.RejectionCode)
+                .HasConversion<string>()
+                .HasMaxLength(50);
+            entity.Property(e => e.RejectionReason).HasMaxLength(255);
+            entity.Property(e => e.SubmittedAtUtc).IsRequired();
+            entity.HasIndex(e => e.RequestId).IsUnique();
+            entity.HasIndex(e => e.CorrelationId);
+        });
     }
 }
