@@ -10,15 +10,18 @@ namespace Trading.Oms.Application.Services;
 public class CancelOrderCommandHandler(
     IMatchingEngineClient matchingEngineClient,
     IIdempotencyRepository idempotencyRepository,
-    IHashingService hashingService) : ICancelOrderCommandHandler
+    IHashingService hashingService,
+    ICommandAuditRepository commandAuditRepository) : ICancelOrderCommandHandler
 {
     private readonly IMatchingEngineClient _matchingEngineClient = matchingEngineClient;
     private readonly IIdempotencyRepository _idempotencyRepository = idempotencyRepository;
     private readonly IHashingService _hashingService = hashingService;
+    private readonly ICommandAuditRepository _commandAuditRepository = commandAuditRepository;
 
 
     public async Task<CommandAckResult> HandleAsync(CancelOrderCommand cmd, CancellationToken token)
     {
+        
         const string scope = "POST:/api/orders/cancel";
 
         var (isValid, rejectCode, reason) = _validate(cmd);
@@ -53,11 +56,31 @@ public class CancelOrderCommandHandler(
 
         await _idempotencyRepository.ReserveAsync(reserve, token);
 
+        var commandAudit = new CommandAudit()
+        {
+            RequestId = cmd.RequestId,
+            CorrelationId = cmd.CorrelationId,
+            IdempotencyKey = cmd.IdempotencyKey,
+            OrderId = (long)cmd.OrderId,
+            AccountId = cmd.AccountId,
+            CommandType = CommandType.CancelOrder,
+            PayloadHash = currentCmdHash,
+            RequestPayloadJson = JsonSerializer.Serialize(cmd),
+            Status = Status.Received,
+            SubmittedAtUtc = cmd.SubmittedAtUtc,
+        };
+
+       
+
         // 4. Execution
 
         try
         {
+            await _commandAuditRepository.InsertReceivedAsync(commandAudit, token);
+            
             var engineResult = await _matchingEngineClient.CancelOrderCommand(cmd);
+
+            var completedAt = DateTimeOffset.UtcNow;
 
             var finalResult = _createResult(cmd, engineResult.Status, engineResult.RejectionCode,
                 engineResult.RejectionReason);
@@ -69,13 +92,16 @@ public class CancelOrderCommandHandler(
                 reserve.IdempotencyKey,
                 _mapStatusToStatusCode(finalResult.Status),
                 JsonSerializer.Serialize(finalResult),
-                DateTimeOffset.UtcNow,
+                completedAt,
                 token
             );
 
+            await _commandAuditRepository.MarkCompletedAsync(cmd.RequestId, engineResult.Status, (long)cmd.OrderId,
+                engineResult.RejectionCode, engineResult.RejectionReason, completedAt, token);
+
             return finalResult;
         }
-        catch (Exception)
+        catch (Exception ex)
         {
             await _idempotencyRepository.FailAsync(reserve.Scope,
                 reserve.AccountId,
@@ -83,6 +109,9 @@ public class CancelOrderCommandHandler(
                 _mapStatusToStatusCode(Status.Unknown),
                 DateTimeOffset.UtcNow,
                 token);
+
+            await _commandAuditRepository.MarkFailedAsync(cmd.RequestId, Status.Failed, ex.Message,
+                DateTimeOffset.UtcNow, token);
 
             throw;
         }

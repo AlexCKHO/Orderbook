@@ -41,18 +41,22 @@ public class CommandAuditRepository(OmsDbContext _dbContext) : ICommandAuditRepo
         }
     }
 
-    public async Task UpdateStatusAsync(long auditId, Status status, CancellationToken token)
+    public async Task MarkFailedAsync(string requestId, Status status, string? rejectionReason,
+        DateTimeOffset completedAt, CancellationToken token)
     {
         try
         {
-            var result = await _commandAuditEntitySet.FindAsync([auditId], token);
+            var result = await _commandAuditEntitySet.FindAsync([requestId], token);
 
             if (result == null)
             {
-                throw new CommandAuditConflictException($"CommandAudit entity {auditId} not found");
+                throw new CommandAuditConflictException($"CommandAudit entity {requestId} not found");
             }
 
+
             result.Status = status;
+            result.CompletedAtUtc = completedAt;
+            result.RejectionReason = rejectionReason;
 
             _commandAuditEntitySet.Update(result);
 
@@ -60,16 +64,22 @@ public class CommandAuditRepository(OmsDbContext _dbContext) : ICommandAuditRepo
         }
         catch (DbUpdateException ex)
         {
-            throw new CommandAuditConflictException($"Duplicate Idempotency key {ex.Message}");
+            throw new CommandAuditConflictException($"Command audit persistence conflict {ex.Message}");
         }
     }
 
+    public async Task<CommandAuditEntity?> GetByRequestIdAsync(string requestId, CancellationToken token)
+    {
+        return await _dbContext.command_audits
+            .SingleOrDefaultAsync(x => x.RequestId == requestId, token);
+    }
+
     public async Task MarkCompletedAsync(string requestId, Status engineStatus, long orderId,
-        RejectionCode rejectionCode, string rejectionReason, CancellationToken token)
+        RejectionCode? rejectionCode, string? rejectionReason, DateTimeOffset completedAtUtc, CancellationToken token)
     {
         try
         {
-            var result = await _commandAuditEntitySet.FindAsync([requestId], token);
+            var result = await GetByRequestIdAsync(requestId, token);
 
             if (result == null)
             {
@@ -80,6 +90,7 @@ public class CommandAuditRepository(OmsDbContext _dbContext) : ICommandAuditRepo
             result.OrderId = orderId;
             result.RejectionCode = rejectionCode;
             result.RejectionReason = rejectionReason;
+            result.CompletedAtUtc = completedAtUtc;
 
             _commandAuditEntitySet.Update(result);
 

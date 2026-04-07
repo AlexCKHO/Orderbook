@@ -38,7 +38,7 @@ public class Program
         builder.Services.AddScoped<IHashingService, Sha256HashingService>();
         builder.Services.AddScoped<IPlaceOrderCommandHandler, PlaceOrderCommandHandler>();
         builder.Services.AddScoped<ICancelOrderCommandHandler, CancelOrderCommandHandler>();
-
+        builder.Services.AddScoped<ICommandAuditRepository, CommandAuditRepository>();
 
         var app = builder.Build();
         // Configure the HTTP request pipeline.

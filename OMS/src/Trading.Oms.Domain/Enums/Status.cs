@@ -5,5 +5,6 @@ public enum Status
     Unknown = 0,
     Submitted = 1,
     Rejected = 2,
-    Recieved = 3,
+    Received = 3,
+    Failed = 4,
 }

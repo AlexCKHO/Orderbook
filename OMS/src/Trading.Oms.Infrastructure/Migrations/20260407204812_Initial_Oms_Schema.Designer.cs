@@ -12,7 +12,7 @@ using Trading.Oms.Infrastructure.Persistence;
 namespace Trading.Oms.Infrastructure.Migrations
 {
     [DbContext(typeof(OmsDbContext))]
-    [Migration("20260406145612_Initial_Oms_Schema")]
+    [Migration("20260407204812_Initial_Oms_Schema")]
     partial class Initial_Oms_Schema
     {
         /// <inheritdoc />
@@ -27,11 +27,9 @@ namespace Trading.Oms.Infrastructure.Migrations
 
             modelBuilder.Entity("Trading.Oms.Infrastructure.Persistence.Entities.CommandAuditEntity", b =>
                 {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+                    b.Property<string>("RequestId")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
 
                     b.Property<long>("AccountId")
                         .HasColumnType("bigint");
@@ -48,6 +46,12 @@ namespace Trading.Oms.Infrastructure.Migrations
                         .IsRequired()
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");
+
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
 
                     b.Property<string>("IdempotencyKey")
                         .IsRequired()
@@ -70,11 +74,6 @@ namespace Trading.Oms.Infrastructure.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)");
 
-                    b.Property<string>("RequestId")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
-
                     b.Property<string>("RequestPayloadJson")
                         .IsRequired()
                         .HasColumnType("jsonb");
@@ -87,7 +86,7 @@ namespace Trading.Oms.Infrastructure.Migrations
                     b.Property<DateTimeOffset>("SubmittedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
-                    b.HasKey("Id");
+                    b.HasKey("RequestId");
 
                     b.HasIndex("CorrelationId");
 

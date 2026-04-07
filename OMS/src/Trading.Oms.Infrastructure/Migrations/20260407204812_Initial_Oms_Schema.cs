@@ -16,9 +16,9 @@ namespace Trading.Oms.Infrastructure.Migrations
                 name: "command_audits",
                 columns: table => new
                 {
+                    RequestId = table.Column<string>(type: "character varying(50)", maxLength: 50, nullable: false),
                     Id = table.Column<long>(type: "bigint", nullable: false)
                         .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
-                    RequestId = table.Column<string>(type: "character varying(50)", maxLength: 50, nullable: false),
                     CorrelationId = table.Column<string>(type: "character varying(50)", maxLength: 50, nullable: false),
                     IdempotencyKey = table.Column<string>(type: "character varying(100)", maxLength: 100, nullable: false),
                     AccountId = table.Column<long>(type: "bigint", nullable: false),
@@ -34,7 +34,7 @@ namespace Trading.Oms.Infrastructure.Migrations
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_command_audits", x => x.Id);
+                    table.PrimaryKey("PK_command_audits", x => x.RequestId);
                 });
 
             migrationBuilder.CreateTable(

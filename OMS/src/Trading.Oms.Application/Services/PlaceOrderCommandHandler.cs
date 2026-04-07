@@ -43,22 +43,6 @@ public class PlaceOrderCommandHandler(
         var currentCmdHash = _hashingService.HashPlaceOrderCommand(
             cmd.AccountId, cmd.Symbol, cmd.Side, cmd.OrderType, cmd.Quantity, cmd.Price);
 
-        // 3. Reservation
-        var commandAudit = new CommandAudit()
-        {
-            RequestId = cmd.RequestId,
-            CorrelationId = cmd.CorrelationId,
-            IdempotencyKey = cmd.IdempotencyKey,
-            AccountId = cmd.AccountId,
-            CommandType = CommandType.PlaceOrder,
-            PayloadHash = currentCmdHash,
-            RequestPayloadJson = JsonSerializer.Serialize(cmd),
-            Status = Status.Recieved,
-            SubmittedAtUtc = cmd.SubmittedAtUtc,
-        };
-
-        await _commandAuditRepository.InsertReceivedAsync(commandAudit, token);
-
         // 2. Idempotency Check
 
 
@@ -82,10 +66,27 @@ public class PlaceOrderCommandHandler(
         };
         await _idempotencyRepository.ReserveAsync(reserve, token);
 
+        var commandAudit = new CommandAudit()
+        {
+            RequestId = cmd.RequestId,
+            CorrelationId = cmd.CorrelationId,
+            IdempotencyKey = cmd.IdempotencyKey,
+            AccountId = cmd.AccountId,
+            CommandType = CommandType.PlaceOrder,
+            PayloadHash = currentCmdHash,
+            RequestPayloadJson = JsonSerializer.Serialize(cmd),
+            Status = Status.Received,
+            SubmittedAtUtc = cmd.SubmittedAtUtc,
+        };
+
+      
+
         // 4. Execution
 
         try
         {
+            await _commandAuditRepository.InsertReceivedAsync(commandAudit, token);
+            
             var sequence = await _orderSequenceAllocator.AllocateNextSequenceForAccount(cmd.AccountId);
             var orderId = _orderIdComposer.Compose(cmd.AccountId, sequence);
 
@@ -96,7 +97,6 @@ public class PlaceOrderCommandHandler(
                 engineResult.RejectionReason);
 
             DateTimeOffset completedAt = DateTimeOffset.UtcNow;
-
 
             // 5. Completion
             await _idempotencyRepository.CompleteAsync(
@@ -109,9 +109,13 @@ public class PlaceOrderCommandHandler(
                 token
             );
 
+            await _commandAuditRepository.MarkCompletedAsync(cmd.RequestId, engineResult.Status, (long)orderId,
+                engineResult.RejectionCode, engineResult.RejectionReason, completedAt, token);
+
+
             return finalResult;
         }
-        catch (Exception)
+        catch (Exception ex)
         {
             await _idempotencyRepository.FailAsync(reserve.Scope,
                 reserve.AccountId,
@@ -119,6 +123,9 @@ public class PlaceOrderCommandHandler(
                 _mapStatusToStatusCode(Status.Unknown),
                 DateTimeOffset.UtcNow,
                 token);
+
+            await _commandAuditRepository.MarkFailedAsync(cmd.RequestId, Status.Failed, ex.Message,
+                DateTimeOffset.UtcNow, token);
 
             throw;
         }
@@ -152,7 +159,9 @@ public class PlaceOrderCommandHandler(
             }
 
             return JsonSerializer
-                .Deserialize<CommandAckResult>(record.ResponseJson);
+                       .Deserialize<CommandAckResult>(record.ResponseJson) ??
+                   throw new IdempotencyConflictException($"Failed to deserialize the cached idempotency result.");
+            ;
         }
 
         if (string.IsNullOrWhiteSpace(record.ResponseJson))

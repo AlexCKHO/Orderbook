@@ -29,17 +29,19 @@ public class OmsDbContext : DbContext
                 .HasMaxLength(40)
                 .IsRequired();
 
-            entity.Property(e => e.ResponseJson) .HasColumnType("jsonb");
-            entity.HasIndex(e => e.ExpiresAtUtc) .HasDatabaseName("ix_idempotency_records_expires_at_utc");
+            entity.Property(e => e.ResponseJson).HasColumnType("jsonb");
+            entity.HasIndex(e => e.ExpiresAtUtc).HasDatabaseName("ix_idempotency_records_expires_at_utc");
         });
 
         modelBuilder.Entity<CommandAuditEntity>(entity =>
         {
             entity.ToTable("command_audits");
-
-            entity.HasIndex(e => new { e.RequestId, e.CorrelationId, e.AccountId, e.SubmittedAtUtc });
+            entity.HasKey(e => e.Id); 
             entity.Property(e => e.Id)
                 .UseIdentityByDefaultColumn();
+            
+            entity.HasIndex(e => e.RequestId)
+                .IsUnique(); 
 
             entity.Property(e => e.RequestId).HasMaxLength(50).IsRequired();
             entity.Property(e => e.CorrelationId).HasMaxLength(50).IsRequired();
