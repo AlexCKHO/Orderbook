@@ -1,17 +1,27 @@
 @OMS_HostAddress = http://localhost:5059
-@idempotencyKey = test-key-001
-@correlationId = corr-001
+
+@placeReplayKey = place-replay-001
+@placeConflictKey = place-conflict-001
+@placeCorrelationId = corr-place-001
+
+@cancelReplayKey = cancel-replay-001
+@cancelConflictKey = cancel-conflict-001
+@cancelCorrelationId = corr-cancel-001
 
 ### Health
 GET {{OMS_HostAddress}}/health
+Accept: application/json
+
+### Ready
+GET {{OMS_HostAddress}}/ready
 Accept: application/json
 
 ### Place Order - valid
 POST {{OMS_HostAddress}}/api/orders
 Accept: application/json
 Content-Type: application/json
-X-Idempotency-Key: {{idempotencyKey}}
-X-Correlation-ID: {{correlationId}}
+X-Idempotency-Key: {{placeReplayKey}}
+X-Correlation-ID: {{placeCorrelationId}}
 
 {
   "accountId": 32,
@@ -26,8 +36,8 @@ X-Correlation-ID: {{correlationId}}
 POST {{OMS_HostAddress}}/api/orders
 Accept: application/json
 Content-Type: application/json
-X-Idempotency-Key: {{idempotencyKey}}
-X-Correlation-ID: {{correlationId}}
+X-Idempotency-Key: {{placeReplayKey}}
+X-Correlation-ID: {{placeCorrelationId}}
 
 {
   "accountId": 32,
@@ -42,8 +52,24 @@ X-Correlation-ID: {{correlationId}}
 POST {{OMS_HostAddress}}/api/orders
 Accept: application/json
 Content-Type: application/json
-X-Idempotency-Key: {{idempotencyKey}}
-X-Correlation-ID: {{correlationId}}
+X-Idempotency-Key: {{placeConflictKey}}
+X-Correlation-ID: corr-place-conflict-001
+
+{
+  "accountId": 32,
+  "symbol": "BTC-USD",
+  "side": 1,
+  "orderType": 1,
+  "quantity": 100,
+  "price": 50000
+}
+
+### Place Order - same key different payload second request -> should conflict
+POST {{OMS_HostAddress}}/api/orders
+Accept: application/json
+Content-Type: application/json
+X-Idempotency-Key: {{placeConflictKey}}
+X-Correlation-ID: corr-place-conflict-001
 
 {
   "accountId": 32,
@@ -68,12 +94,44 @@ Content-Type: application/json
   "price": 50000
 }
 
+### Place Order - invalid symbol -> should 400
+POST {{OMS_HostAddress}}/api/orders
+Accept: application/json
+Content-Type: application/json
+X-Idempotency-Key: place-invalid-symbol-001
+X-Correlation-ID: corr-place-invalid-symbol-001
+
+{
+  "accountId": 32,
+  "symbol": "DOGE-USD",
+  "side": 1,
+  "orderType": 1,
+  "quantity": 100,
+  "price": 50000
+}
+
+### Place Order - market order with price -> should 400
+POST {{OMS_HostAddress}}/api/orders
+Accept: application/json
+Content-Type: application/json
+X-Idempotency-Key: place-market-price-001
+X-Correlation-ID: corr-place-market-price-001
+
+{
+  "accountId": 32,
+  "symbol": "BTC-USD",
+  "side": 1,
+  "orderType": 2,
+  "quantity": 100,
+  "price": 50000
+}
+
 ### Cancel Order - valid
 POST {{OMS_HostAddress}}/api/orders/cancel
 Accept: application/json
 Content-Type: application/json
-X-Idempotency-Key: cancel-key-001
-X-Correlation-ID: corr-cancel-001
+X-Idempotency-Key: {{cancelReplayKey}}
+X-Correlation-ID: {{cancelCorrelationId}}
 
 {
   "accountId": 32,
@@ -84,22 +142,46 @@ X-Correlation-ID: corr-cancel-001
 POST {{OMS_HostAddress}}/api/orders/cancel
 Accept: application/json
 Content-Type: application/json
-X-Idempotency-Key: cancel-key-001
-X-Correlation-ID: corr-cancel-001
+X-Idempotency-Key: {{cancelReplayKey}}
+X-Correlation-ID: {{cancelCorrelationId}}
 
 {
   "accountId": 32,
   "orderId": 137438953473
 }
 
-### Cancel Order - same key different payload -> should conflict
+### Cancel Order - same key different payload
 POST {{OMS_HostAddress}}/api/orders/cancel
 Accept: application/json
 Content-Type: application/json
-X-Idempotency-Key: cancel-key-001
-X-Correlation-ID: corr-cancel-001
+X-Idempotency-Key: {{cancelConflictKey}}
+X-Correlation-ID: {{cancelCorrelationId}}
+
+{
+  "accountId": 32,
+  "orderId": 137438953473
+}
+
+### Cancel Order - same key different payload second request -> should conflict
+POST {{OMS_HostAddress}}/api/orders/cancel
+Accept: application/json
+Content-Type: application/json
+X-Idempotency-Key: {{cancelConflictKey}}
+X-Correlation-ID: {{cancelCorrelationId}}
 
 {
   "accountId": 32,
   "orderId": 137438953474
+}
+
+### Cancel Order - invalid account/order mismatch -> should 400
+POST {{OMS_HostAddress}}/api/orders/cancel
+Accept: application/json
+Content-Type: application/json
+X-Idempotency-Key: cancel-invalid-001
+X-Correlation-ID: corr-cancel-invalid-001
+
+{
+  "accountId": 33,
+  "orderId": 137438953473
 }

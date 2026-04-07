@@ -46,7 +46,7 @@ public class CommandAuditRepository(OmsDbContext _dbContext) : ICommandAuditRepo
     {
         try
         {
-            var result = await _commandAuditEntitySet.FindAsync([requestId], token);
+            var result = await GetByRequestIdAsync(requestId, token);
 
             if (result == null)
             {

@@ -8,6 +8,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Trading.Oms.Domain", "src\T
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Trading.Oms.Infrastructure", "src\Trading.Oms.Infrastructure\Trading.Oms.Infrastructure.csproj", "{9F8153F6-0427-4F3B-804D-70C77B2C5C54}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{0AB3BF05-4346-4AA6-1389-037BE0695223}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Trading.Oms.Infrastructure.Tests", "tests\Trading.Oms.Infrastructure.Tests\Trading.Oms.Infrastructure.Tests.csproj", "{F5FF0C78-38EA-48FA-979C-291246DFF2B8}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -30,5 +34,15 @@ Global
 		{9F8153F6-0427-4F3B-804D-70C77B2C5C54}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{9F8153F6-0427-4F3B-804D-70C77B2C5C54}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{9F8153F6-0427-4F3B-804D-70C77B2C5C54}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F5FF0C78-38EA-48FA-979C-291246DFF2B8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F5FF0C78-38EA-48FA-979C-291246DFF2B8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F5FF0C78-38EA-48FA-979C-291246DFF2B8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F5FF0C78-38EA-48FA-979C-291246DFF2B8}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{F5FF0C78-38EA-48FA-979C-291246DFF2B8} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 	EndGlobalSection
 EndGlobal
