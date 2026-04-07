@@ -13,7 +13,8 @@ public class PlaceOrderCommandHandler(
     IOrderIdComposer orderIdComposer,
     IMatchingEngineClient matchingEngineClient,
     IIdempotencyRepository idempotencyRepository,
-    IHashingService hashingService
+    IHashingService hashingService,
+    ICommandAuditRepository commandAuditRepository
 ) : IPlaceOrderCommandHandler
 {
     private readonly IOrderSequenceAllocator _orderSequenceAllocator = orderSequenceAllocator;
@@ -21,6 +22,7 @@ public class PlaceOrderCommandHandler(
     private readonly IMatchingEngineClient _matchingEngineClient = matchingEngineClient;
     private readonly IIdempotencyRepository _idempotencyRepository = idempotencyRepository;
     private readonly IHashingService _hashingService = hashingService;
+    private readonly ICommandAuditRepository _commandAuditRepository = commandAuditRepository;
 
     public async Task<CommandAckResult> HandleAsync(PlaceOrderCommand cmd, CancellationToken token)
     {
@@ -38,9 +40,27 @@ public class PlaceOrderCommandHandler(
             return _createResult(cmd, Status.Rejected, null, rejectCode, reason);
         }
 
-        // 2. Idempotency Check
         var currentCmdHash = _hashingService.HashPlaceOrderCommand(
             cmd.AccountId, cmd.Symbol, cmd.Side, cmd.OrderType, cmd.Quantity, cmd.Price);
+
+        // 3. Reservation
+        var commandAudit = new CommandAudit()
+        {
+            RequestId = cmd.RequestId,
+            CorrelationId = cmd.CorrelationId,
+            IdempotencyKey = cmd.IdempotencyKey,
+            AccountId = cmd.AccountId,
+            CommandType = CommandType.PlaceOrder,
+            PayloadHash = currentCmdHash,
+            RequestPayloadJson = JsonSerializer.Serialize(cmd),
+            Status = Status.Recieved,
+            SubmittedAtUtc = cmd.SubmittedAtUtc,
+        };
+
+        await _commandAuditRepository.InsertReceivedAsync(commandAudit, token);
+
+        // 2. Idempotency Check
+
 
         var record = await _idempotencyRepository.GetAsync(scope, cmd.AccountId, cmd.IdempotencyKey, token);
 
@@ -62,7 +82,6 @@ public class PlaceOrderCommandHandler(
         };
         await _idempotencyRepository.ReserveAsync(reserve, token);
 
-
         // 4. Execution
 
         try
@@ -76,6 +95,9 @@ public class PlaceOrderCommandHandler(
             var finalResult = _createResult(cmd, engineResult.Status, orderId, engineResult.RejectionCode,
                 engineResult.RejectionReason);
 
+            DateTimeOffset completedAt = DateTimeOffset.UtcNow;
+
+
             // 5. Completion
             await _idempotencyRepository.CompleteAsync(
                 reserve.Scope,
@@ -83,7 +105,7 @@ public class PlaceOrderCommandHandler(
                 reserve.IdempotencyKey,
                 _mapStatusToStatusCode(finalResult.Status),
                 JsonSerializer.Serialize(finalResult),
-                DateTimeOffset.UtcNow,
+                completedAt,
                 token
             );
 

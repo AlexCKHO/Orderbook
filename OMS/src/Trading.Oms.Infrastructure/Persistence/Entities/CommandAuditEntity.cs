@@ -6,7 +6,7 @@ namespace Trading.Oms.Infrastructure.Persistence.Entities;
 public class CommandAuditEntity
 
 {
-    public long Id { get; set; }
+    public long Id { get; }
     public required string RequestId { get; set; }
     public required string CorrelationId { get; set; }
     public required string IdempotencyKey { get; set; }
@@ -20,4 +20,6 @@ public class CommandAuditEntity
     public string? RejectionReason { get; set; }
     public required DateTimeOffset SubmittedAtUtc { get; set; }
     public DateTimeOffset? CompletedAtUtc { get; set; }
+
+    
 }
