@@ -2,7 +2,7 @@ using Trading.Oms.Application.Models;
 
 namespace Trading.Oms.Application.Interfaces;
 
-public interface IIdempotencyStore
+public interface IIdempotencyRepository
 {
     public Task<IdempotencyRecord?> GetAsync(string scope, uint accountId, string idempotencyKey,
         CancellationToken token);

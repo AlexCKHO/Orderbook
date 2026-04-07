@@ -9,11 +9,11 @@ namespace Trading.Oms.Application.Services;
 
 public class CancelOrderCommandHandler(
     IMatchingEngineClient matchingEngineClient,
-    IIdempotencyStore idempotencyStore,
+    IIdempotencyRepository idempotencyRepository,
     IHashingService hashingService) : ICancelOrderCommandHandler
 {
     private readonly IMatchingEngineClient _matchingEngineClient = matchingEngineClient;
-    private readonly IIdempotencyStore _idempotencyStore = idempotencyStore;
+    private readonly IIdempotencyRepository _idempotencyRepository = idempotencyRepository;
     private readonly IHashingService _hashingService = hashingService;
 
 
@@ -32,7 +32,7 @@ public class CancelOrderCommandHandler(
 
         var currentCmdHash = _hashingService.HashCancelOrderCommand(cmd.AccountId, cmd.OrderId);
 
-        var record = await _idempotencyStore.GetAsync(scope, cmd.AccountId, cmd.IdempotencyKey, token);
+        var record = await _idempotencyRepository.GetAsync(scope, cmd.AccountId, cmd.IdempotencyKey, token);
 
         if (record is not null)
         {
@@ -51,7 +51,7 @@ public class CancelOrderCommandHandler(
             ExpiresAtUtc = DateTimeOffset.UtcNow.AddHours(24)
         };
 
-        await _idempotencyStore.ReserveAsync(reserve, token);
+        await _idempotencyRepository.ReserveAsync(reserve, token);
 
         // 4. Execution
 
@@ -63,7 +63,7 @@ public class CancelOrderCommandHandler(
                 engineResult.RejectionReason);
 
             // 5. Completion
-            await _idempotencyStore.CompleteAsync(
+            await _idempotencyRepository.CompleteAsync(
                 reserve.Scope,
                 reserve.AccountId,
                 reserve.IdempotencyKey,
@@ -77,7 +77,7 @@ public class CancelOrderCommandHandler(
         }
         catch (Exception)
         {
-            await _idempotencyStore.FailAsync(reserve.Scope,
+            await _idempotencyRepository.FailAsync(reserve.Scope,
                 reserve.AccountId,
                 reserve.IdempotencyKey,
                 _mapStatusToStatusCode(Status.Unknown),

@@ -8,8 +8,8 @@ using Trading.Oms.Infrastructure.Persistence.Entities;
 
 namespace Trading.Oms.Infrastructure.Repositories;
 
-public class IdempotencyStore(OmsDbContext dbContext)
-    : IIdempotencyStore
+public class IdempotencyRepository(OmsDbContext dbContext)
+    : IIdempotencyRepository
 {
     readonly OmsDbContext _dbContext = dbContext;
     readonly DbSet<IdempotencyRecordEntity> _idempotencyRecordsSet = dbContext.Set<IdempotencyRecordEntity>();

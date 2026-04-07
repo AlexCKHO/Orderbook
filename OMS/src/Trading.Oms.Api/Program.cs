@@ -34,7 +34,7 @@ public class Program
         builder.Services.AddScoped<IOrderSequenceAllocator, MockOrderSequenceAllocator>();
         builder.Services.AddScoped<IOrderIdComposer, OrderIdComposer>();
         builder.Services.AddScoped<IMatchingEngineClient, MockMatchingEngineClient>();
-        builder.Services.AddScoped<IIdempotencyStore, IdempotencyStore>();
+        builder.Services.AddScoped<IIdempotencyRepository, IdempotencyRepository>();
         builder.Services.AddScoped<IHashingService, Sha256HashingService>();
         builder.Services.AddScoped<IPlaceOrderCommandHandler, PlaceOrderCommandHandler>();
         builder.Services.AddScoped<ICancelOrderCommandHandler, CancelOrderCommandHandler>();
