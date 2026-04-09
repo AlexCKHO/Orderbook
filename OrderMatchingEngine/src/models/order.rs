@@ -20,7 +20,8 @@ pub enum EngineAction {
 
 #[derive(Debug, Clone)]
 pub struct OrderEntry {
-    pub client_id: u64,
+    pub client_order_id: u64,
+    pub engine_order_id: u64,
     pub price: u64,
     pub qty: u64,
     pub side: Side,
@@ -42,5 +43,5 @@ pub struct OrderEntry {
 
 #[derive(Debug, Clone)]
 pub struct CancelEntry {
-    pub client_id: u64,
+    pub engine_order_id: u64,
 }

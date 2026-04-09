@@ -33,8 +33,8 @@ async fn main() {
 
     // main.rs
     let (inbound_tx, inbound_rx) = mpsc::channel::<Vec<EngineAction>>(128);
-    let (dispatcher_tx, mut dispatcher_rx) = mpsc::channel::<Vec<MatchEvent>>(2048);
-    let (kafka_tx, kafka_rx) = mpsc::channel::<Vec<MatchEvent>>(8192);
+    let (dispatcher_tx, mut dispatcher_rx) = mpsc::channel::<Vec<(MatchEvent, u64)>>(2048);
+    let (kafka_tx, kafka_rx) = mpsc::channel::<Vec<(MatchEvent, u64)>>(8192);
 
     // 1. Initialize handles as Options or empty vectors outside the if blocks
     let mut consumer_tasks = Vec::new();
@@ -75,11 +75,7 @@ async fn main() {
             dispatcher.run(dispatcher_rx).await;
         }));
     } else {
-        tokio::spawn(async move {
-            while let Some(_) = dispatcher_rx.recv().await {
-
-            }
-        });
+        tokio::spawn(async move { while let Some(_) = dispatcher_rx.recv().await {} });
     }
 
     // gRPC setup...

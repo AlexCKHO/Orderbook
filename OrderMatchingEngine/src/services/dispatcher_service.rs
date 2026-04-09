@@ -4,15 +4,15 @@ use tokio::sync::mpsc::error::TrySendError;
 use tokio::time::Instant;
 
 pub struct DispatcherService {
-    kafka_tx: mpsc::Sender<Vec<MatchEvent>>,
+    kafka_tx: mpsc::Sender<Vec<(MatchEvent, u64)>>,
 }
 
 impl DispatcherService {
-    pub fn new(kafka_tx: mpsc::Sender<Vec<MatchEvent>>) -> Self {
+    pub fn new(kafka_tx: mpsc::Sender<Vec<(MatchEvent, u64)>>) -> Self {
         Self { kafka_tx }
     }
 
-    pub async fn run(self, mut dispatcher_rx: mpsc::Receiver<Vec<MatchEvent>>) {
+    pub async fn run(self, mut dispatcher_rx: mpsc::Receiver<Vec<(MatchEvent, u64)>>) {
         let mut batches_forwarded: u64 = 0;
         let mut batches_blocked: u64 = 0;
 

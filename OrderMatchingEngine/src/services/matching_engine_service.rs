@@ -9,11 +9,11 @@ use crate::models::events::MatchEvent;
 use crate::models::order::EngineAction;
 
 pub struct MatchingEngineService {
-    dispatcher_tx: mpsc::Sender<Vec<MatchEvent>>,
+    dispatcher_tx: mpsc::Sender<Vec<(MatchEvent, u64)>>,
 }
 
 impl MatchingEngineService {
-    pub fn new(dispatcher_tx: mpsc::Sender<Vec<MatchEvent>>) -> Self {
+    pub fn new(dispatcher_tx: mpsc::Sender<Vec<(MatchEvent, u64)>>) -> Self {
         Self { dispatcher_tx }
     }
 
@@ -23,27 +23,41 @@ impl MatchingEngineService {
         mut inbound_rx: mpsc::Receiver<Vec<EngineAction>>,
         counter: Arc<AtomicU64>,
     ) {
-        let mut order_book = OrderBook::new(0, 0);
+        let mut last_engine_id: u64 = 0;
+        let mut last_event_sequence: u64 = 0;
+        let mut order_book = OrderBook::new(0);
 
         // Increase capacity a bit since we are handling 5000+ orders at a time
         let mut reusable_events_buffer: Vec<MatchEvent> = Vec::with_capacity(8192);
 
         // `cmd_batch` is now a Vec<EngineAction>
-        while let Some(cmd_batch) = inbound_rx.recv().await {
+        while let Some(mut cmd_batch) = inbound_rx.recv().await {
             let batch_size = cmd_batch.len() as u64;
 
-            // 2. ✅ Unleash the CPU: Process the entire vector synchronously
+            for cmd in cmd_batch.iter_mut() {
+                if let EngineAction::Create(order) = cmd {
+                    last_engine_id += 1;
+                    order.engine_order_id = last_engine_id;
+                }
+            }
+
             order_book.process_batch(cmd_batch, &mut reusable_events_buffer);
 
             if !reusable_events_buffer.is_empty() {
-                // Ship the whole event batch in one go so the hot path only pays
-                // a single channel handoff instead of N async sends.
                 let event_batch = std::mem::take(&mut reusable_events_buffer);
 
-                match self.dispatcher_tx.try_send(event_batch) {
+                let sequenced_batch: Vec<(MatchEvent, u64)> = event_batch
+                    .into_iter()
+                    .map(|evt| {
+                        last_event_sequence += 1;
+                        (evt, last_event_sequence)
+                    })
+                    .collect();
+
+                match self.dispatcher_tx.try_send(sequenced_batch) {
                     Ok(()) => {}
-                    Err(TrySendError::Full(event_batch)) => {
-                        if let Err(e) = self.dispatcher_tx.send(event_batch).await {
+                    Err(TrySendError::Full(batch)) => {
+                        if let Err(e) = self.dispatcher_tx.send(batch).await {
                             eprintln!("Critical Error: Dispatcher channel closed: {}", e);
                             break;
                         }
@@ -54,10 +68,9 @@ impl MatchingEngineService {
                     }
                 }
 
-               reusable_events_buffer = Vec::with_capacity(8192);
-           }
+                reusable_events_buffer = Vec::with_capacity(8192);
+            }
 
-            // 4. ✅ Add the whole batch size to the TPS counter at once!
             counter.fetch_add(batch_size, Ordering::Relaxed);
         }
     }
