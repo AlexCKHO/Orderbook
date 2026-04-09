@@ -54,8 +54,8 @@ impl MatchingEngineService {
                     }
                 }
 
-                reusable_events_buffer = Vec::with_capacity(8192);
-            }
+               reusable_events_buffer = Vec::with_capacity(8192);
+           }
 
             // 4. ✅ Add the whole batch size to the TPS counter at once!
             counter.fetch_add(batch_size, Ordering::Relaxed);

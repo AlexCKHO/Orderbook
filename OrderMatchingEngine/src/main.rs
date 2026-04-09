@@ -33,7 +33,7 @@ async fn main() {
 
     // main.rs
     let (inbound_tx, inbound_rx) = mpsc::channel::<Vec<EngineAction>>(128);
-    let (dispatcher_tx, dispatcher_rx) = mpsc::channel::<Vec<MatchEvent>>(2048);
+    let (dispatcher_tx, mut dispatcher_rx) = mpsc::channel::<Vec<MatchEvent>>(2048);
     let (kafka_tx, kafka_rx) = mpsc::channel::<Vec<MatchEvent>>(8192);
 
     // 1. Initialize handles as Options or empty vectors outside the if blocks
@@ -41,8 +41,10 @@ async fn main() {
     let mut producer_handle = None;
     let mut dispatcher_handle = None;
 
-    let use_redpanda_consumer = true;
-    let use_redpanda_producer = true;
+    // Receiving message from Kafka
+    let use_redpanda_consumer = false;
+    // Sending message to Kafka
+    let use_redpanda_producer = false;
 
     // Setting up kafka consumer
     if use_redpanda_consumer {
@@ -72,6 +74,12 @@ async fn main() {
         dispatcher_handle = Some(tokio::spawn(async move {
             dispatcher.run(dispatcher_rx).await;
         }));
+    } else {
+        tokio::spawn(async move {
+            while let Some(_) = dispatcher_rx.recv().await {
+
+            }
+        });
     }
 
     // gRPC setup...
