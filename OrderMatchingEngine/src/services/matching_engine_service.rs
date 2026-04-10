@@ -11,6 +11,7 @@ use crate::models::order::EngineAction;
 pub struct MatchingEngineService {
     dispatcher_tx: mpsc::Sender<Vec<(MatchEvent, u64)>>,
 }
+const OMS_MASK: u64 = 1 << 63;
 
 impl MatchingEngineService {
     pub fn new(dispatcher_tx: mpsc::Sender<Vec<(MatchEvent, u64)>>) -> Self {
@@ -23,7 +24,7 @@ impl MatchingEngineService {
         mut inbound_rx: mpsc::Receiver<Vec<EngineAction>>,
         counter: Arc<AtomicU64>,
     ) {
-        let mut last_engine_id: u64 = 0;
+        let mut oms_engine_counter: u64 = 0;
         let mut last_event_sequence: u64 = 0;
         let mut order_book = OrderBook::new(0);
 
@@ -36,8 +37,20 @@ impl MatchingEngineService {
 
             for cmd in cmd_batch.iter_mut() {
                 if let EngineAction::Create(order) = cmd {
-                    last_engine_id += 1;
-                    order.engine_order_id = last_engine_id;
+                    
+                    // OMS orders' client order id start from 1 x 10^64, engine_order_id
+                    // starts from zero
+                    // Historical data's client order id start from 0, engine_order_id
+                    // is same as client order id to simplify the cancelling process
+                    
+                    let is_oms_order = (order.client_order_id & OMS_MASK) != 0;
+
+                    if is_oms_order {
+                        oms_engine_counter += 1;
+                        order.engine_order_id = oms_engine_counter | OMS_MASK;
+                    } else {
+                        order.engine_order_id = order.client_order_id;
+                    }
                 }
             }
 

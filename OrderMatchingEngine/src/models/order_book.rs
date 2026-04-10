@@ -44,6 +44,7 @@ impl OrderBook {
         let (price, side) = match self.order_locations.remove(&engine_order_id) {
             Some(loc) => loc,
             None => {
+                // println!("🚫 Failed to cancel order: {}", engine_order_id);
                 events.push(MatchEvent::CancelRejected {
                     engine_order_id,
                     reason: CancelRejectReason::OrderNotFound,
@@ -63,7 +64,7 @@ impl OrderBook {
                 .position(|o| o.engine_order_id == engine_order_id)
             {
                 let cancelled_order = queue.remove(position).unwrap();
-
+               // println!("✅ Cancel order successfully: {}", engine_order_id);
                 events.push(MatchEvent::OrderCancelled {
                     engine_order_id: cancelled_order.engine_order_id,
                     cancelled_qty: cancelled_order.qty,
@@ -89,6 +90,9 @@ impl OrderBook {
     }
 
     pub fn process_single(&mut self, command: EngineAction, events_buffer: &mut Vec<MatchEvent>) {
+        // println!("🟢 The current asks size is {}", self.asks.len());
+        // println!("🔴 The current bids size is {}", self.bids.len());
+
         match command {
             EngineAction::Create(order) => self.add_order(order, events_buffer),
             EngineAction::Cancel(cancel) => {
@@ -168,7 +172,7 @@ impl OrderBook {
 
                 let current_trade_id = self.trade_id;
                 self.trade_id += 1;
-
+                println!("💵 Current price: {}", bid_price);
                 events.push(MatchEvent::TradeExecuted {
                     maker_engine_order_id: best_bid_order.engine_order_id,
                     taker_engine_order_id: new_ask_order.engine_order_id,
