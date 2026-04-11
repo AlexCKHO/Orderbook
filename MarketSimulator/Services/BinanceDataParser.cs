@@ -9,7 +9,7 @@ public class BinanceDataParser
 {
     private readonly Dictionary<ulong, ulong> _activeBids = new();
     private readonly Dictionary<ulong, ulong> _activeAsks = new();
-    private ulong _currentOrderId = 10_000;
+    private ulong _currentOrderId = 100_000_000;
 
     public int CorruptedLinesCount { get; private set; }
 
@@ -123,8 +123,8 @@ public class BinanceDataParser
                 {
                     CancelOrder = new CancelRequest
                     {
-                        ClientId = oldOrderId,
-                        Timestamp = timestamp 
+                        EngineOrderId = oldOrderId,
+                        Timestamp = timestamp
                     }
                 };
             }

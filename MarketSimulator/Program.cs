@@ -86,6 +86,7 @@ class Program
         var jsonPath = configuration["DataSettings:BinanceJsonDataPath"];
         var engineCommands = new List<EngineCommand>();
 
+
         if (settings.UseHistorical)
         {
             try
@@ -164,6 +165,23 @@ class Program
         }
 
         var commands = engineCommands.ToArray();
+
+
+        try
+        {
+            engineCommands.ForEach(e =>
+            {
+                // Just access the property directly
+                if (e.PlaceOrder != null)
+                {
+                    Console.WriteLine(e.PlaceOrder.ToString());
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine(ex.Message);
+        }
 
         Console.WriteLine($"✅ Loaded {commands.Length:N0} commands into RAM ready for benchmark.");
         Console.WriteLine();
@@ -314,6 +332,8 @@ class Program
         var latencies = new ConcurrentBag<double>();
 
         int totalCommands = commands.Length;
+
+
         int commandsPerTask = totalCommands / settings.Concurrency;
 
         for (int i = 0; i < settings.Concurrency; i++)
@@ -578,7 +598,7 @@ class Program
         {
             CancelOrder = new CancelRequest
             {
-                ClientId = (ulong)(1_000_000 + index),
+                EngineOrderId = (ulong)(1_000_000 + index),
                 Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
             }
         };
