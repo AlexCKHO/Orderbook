@@ -1,3 +1,4 @@
+use crate::models::engine_payload::EnginePayload;
 use crate::models::events::MatchEvent;
 use crate::models::order::EngineAction;
 use crate::orderbook_grpc::{EngineBatchCommand, MatchEvent as ProtoMatchEvent};
@@ -14,7 +15,7 @@ pub struct RedpandaConsumer {
     brokers: String,
     group_id: String,
     topic: String,
-    inbound_tx: mpsc::Sender<Vec<EngineAction>>,
+    inbound_tx: mpsc::Sender<EnginePayload>,
 }
 
 impl RedpandaConsumer {
@@ -22,7 +23,7 @@ impl RedpandaConsumer {
         brokers: &str,
         group_id: &str,
         topic: &str,
-        inbound_tx: mpsc::Sender<Vec<EngineAction>>,
+        inbound_tx: mpsc::Sender<EnginePayload>,
     ) -> Self {
         Self {
             brokers: brokers.to_string(),
