@@ -5,14 +5,17 @@ use std::collections::{BTreeMap, HashMap, VecDeque};
 #[derive(Debug, Clone, Copy)]
 pub struct BookEntry {
     pub engine_order_id: u64,
+    pub client_order_id: u64,
     pub qty: u64, // The only value that changes during the Matching process
 }
 
 // Note: Order book on Tokio Integrating Sync Logic with Async Runtime
 pub struct OrderBook {
+    // price, BookEntry
     pub asks: BTreeMap<u64, VecDeque<BookEntry>>,
     pub bids: BTreeMap<u64, VecDeque<BookEntry>>,
-    pub order_locations: HashMap<u64, (u64, Side)>,
+    // (engine_order_id), (client_order_id, price, side)
+    pub order_locations: HashMap<u64, (u64, u64, Side)>,
     // ID for trade event
     pub trade_id: u64,
 }
@@ -40,41 +43,55 @@ impl OrderBook {
         }
     }
 
-    pub fn cancel_order(&mut self, engine_order_id: u64, events: &mut Vec<MatchEvent>) {
-        let (price, side) = match self.order_locations.remove(&engine_order_id) {
-            Some(loc) => loc,
-            None => {
-                // println!("🚫 Failed to cancel order: {}", engine_order_id);
-                events.push(MatchEvent::CancelRejected {
-                    engine_order_id,
-                    reason: CancelRejectReason::OrderNotFound,
-                });
-                return;
-            }
+    pub fn cancel_order(
+        &mut self,
+        req_client_order_id: u64,
+        engine_order_id: u64,
+        events: &mut Vec<MatchEvent>,
+    ) {
+        let Some(&(client_order_id, price, side)) = self.order_locations.get(&engine_order_id)
+        else {
+            events.push(MatchEvent::CancelRejected {
+                engine_order_id,
+                reason: CancelRejectReason::OrderNotFound,
+            });
+            return;
         };
+
+        if req_client_order_id != client_order_id {
+            events.push(MatchEvent::CancelRejected {
+                engine_order_id,
+                reason: CancelRejectReason::OrderNotFound,
+            });
+            return;
+        }
 
         let book = match side {
             Side::Bid => &mut self.bids,
             Side::Ask => &mut self.asks,
         };
 
-        if let Some(queue) = book.get_mut(&price) {
-            if let Some(position) = queue
-                .iter()
-                .position(|o| o.engine_order_id == engine_order_id)
-            {
-                let cancelled_order = queue.remove(position).unwrap();
-               // println!("✅ Cancel order successfully: {}", engine_order_id);
-                events.push(MatchEvent::OrderCancelled {
-                    engine_order_id: cancelled_order.engine_order_id,
-                    cancelled_qty: cancelled_order.qty,
-                });
+        let Some(queue) = book.get_mut(&price) else {
+            return;
+        };
+        let Some(position) = queue
+            .iter()
+            .position(|o| o.engine_order_id == engine_order_id)
+        else {
+            return;
+        };
 
-                if queue.is_empty() {
-                    book.remove(&price);
-                }
-            }
+        let cancelled_order = queue.remove(position).unwrap();
+        self.order_locations.remove(&engine_order_id);
+
+        if queue.is_empty() {
+            book.remove(&price);
         }
+
+        events.push(MatchEvent::OrderCancelled {
+            engine_order_id: cancelled_order.engine_order_id,
+            cancelled_qty: cancelled_order.qty,
+        });
     }
 
     pub fn process_batch(
@@ -95,9 +112,11 @@ impl OrderBook {
 
         match command {
             EngineAction::Create(order) => self.add_order(order, events_buffer),
-            EngineAction::Cancel(cancel) => {
-                self.cancel_order(cancel.engine_order_id, events_buffer)
-            }
+            EngineAction::Cancel(cancel) => self.cancel_order(
+                cancel.client_order_id,
+                cancel.engine_order_id,
+                events_buffer,
+            ),
         }
     }
 
@@ -131,7 +150,8 @@ impl OrderBook {
 
                 if best_ask_order.qty == 0 {
                     let removed_order = ask_queue.pop_front().unwrap();
-                    self.order_locations.remove(&removed_order.engine_order_id);
+                    self.order_locations
+                        .remove(&(removed_order.engine_order_id));
                 }
 
                 if ask_queue.is_empty() {
@@ -185,7 +205,8 @@ impl OrderBook {
 
                 if best_bid_order.qty == 0 {
                     let removed_order = bid_queue.pop_front().unwrap();
-                    self.order_locations.remove(&removed_order.engine_order_id);
+                    self.order_locations
+                        .remove(&(removed_order.engine_order_id));
                 }
 
                 if bid_queue.is_empty() {
@@ -210,8 +231,12 @@ impl OrderBook {
 
     pub fn add_order_to_bids(&mut self, new_bid_order: OrderEntry, events: &mut Vec<MatchEvent>) {
         self.order_locations.insert(
-            new_bid_order.engine_order_id,
-            (new_bid_order.price, Side::Bid),
+            (new_bid_order.engine_order_id),
+            (
+                new_bid_order.client_order_id,
+                new_bid_order.price,
+                Side::Bid,
+            ),
         );
 
         events.push(MatchEvent::OrderPlaced {
@@ -224,6 +249,7 @@ impl OrderBook {
 
         let new_order = BookEntry {
             engine_order_id: new_bid_order.engine_order_id,
+            client_order_id: new_bid_order.client_order_id,
             qty: new_bid_order.qty,
         };
 
@@ -235,8 +261,12 @@ impl OrderBook {
 
     pub fn add_order_to_asks(&mut self, new_ask_order: OrderEntry, events: &mut Vec<MatchEvent>) {
         self.order_locations.insert(
-            new_ask_order.engine_order_id,
-            (new_ask_order.price, Side::Ask),
+            (new_ask_order.engine_order_id),
+            (
+                new_ask_order.client_order_id,
+                new_ask_order.price,
+                Side::Ask,
+            ),
         );
 
         events.push(MatchEvent::OrderPlaced {
@@ -249,6 +279,7 @@ impl OrderBook {
 
         let new_order = BookEntry {
             engine_order_id: new_ask_order.engine_order_id,
+            client_order_id: new_ask_order.client_order_id,
             qty: new_ask_order.qty,
         };
 

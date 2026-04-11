@@ -1,7 +1,8 @@
 use crate::models::order::EngineAction;
 use crate::orderbook_grpc::matching_engine_server::MatchingEngine;
 use crate::orderbook_grpc::{
-    EngineBatchCommand, MatchEvent as ProtoMatchEvent, OrderBatchResponse, SubscribeRequest,
+    EngineBatchCommand, MatchEvent as ProtoMatchEvent, OrderAck, OrderBatchResponse,
+    SubscribeRequest,
 };
 use futures::Stream;
 use std::pin::Pin;
@@ -13,7 +14,7 @@ pub struct GrpcGateway {
     inbound_tx: mpsc::Sender<Vec<EngineAction>>,
 }
 impl GrpcGateway {
-    pub fn new(inbound_tx: mpsc::Sender<Vec<EngineAction>>) -> Self {
+    pub fn new(inbound_tx: mpsc::Sender<Vec<EnginePayload>>) -> Self {
         Self { inbound_tx }
     }
 }
@@ -52,18 +53,49 @@ impl MatchingEngine for GrpcGateway {
                             }
                         }
 
+                        // 喺 GrpcGateway 嘅 loop 入面：
+
                         let count = batch.len();
                         if count > 0 {
-                            if tx.send(batch).await.is_err() {
+                            // 1. 準備一個「回郵信封」
+                            let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
+
+                            // 2. 將 Batch 同信封一齊送去 Engine
+                            if tx.send((batch, Some(ack_tx))).await.is_err() {
                                 eprintln!("🔥 [CRITICAL] Matching Engine channel closed!");
                                 break;
                             }
+
+                            // 3. 原地等 Engine 覆信 (呢個動作會釋放 CPU，唔會 Block 死)
+                            match ack_rx.await {
+                                Ok(acks) => {
+                                    // 4. 收到 Engine 真實嘅 Acks，包裝成 gRPC Response 送出！
+                                    let reply = OrderBatchResponse {
+                                        success: true,
+                                        message: "Orders queued".into(),
+                                        acks, // 直接用 Engine 畀嗰堆
+                                    };
+                                    let _ = resp_tx.send(Ok(reply)).await;
+                                }
+                                Err(_) => {
+                                    eprintln!("❌ [ERROR] Engine dropped the ack channel!");
+                                    break;
+                                }
+                            }
                         }
+                        let mut ack_vec: Vec<OrderAck> = Vec::new();
+
+                        let ack = OrderAck {
+                            client_order_id: 0,
+                            engine_order_id: 0,
+                        };
+
+                        ack_vec.push(ack);
 
                         let reply = OrderBatchResponse {
                             success: true,
                             message: "Orders queued".into(),
-                            queued_count: count as u64,
+                            acks: ack_vec,
                         };
                         let _ = resp_tx.send(Ok(reply)).await;
                     }

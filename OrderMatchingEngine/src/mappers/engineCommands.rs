@@ -24,7 +24,7 @@ impl TryFrom<OrderRequest> for EngineAction {
         let timestamp = req.timestamp;
 
         Ok(EngineAction::Create(OrderEntry {
-            client_order_id: req.client_id,
+            client_order_id: req.client_order_id,
             engine_order_id: 0,
             price: req.price,
             qty: req.qty,
@@ -38,6 +38,7 @@ impl TryFrom<OrderRequest> for EngineAction {
 impl From<CancelRequest> for EngineAction {
     fn from(req: CancelRequest) -> Self {
         EngineAction::Cancel(CancelEntry {
+            client_order_id: req.client_order_id,
             engine_order_id: req.engine_order_id,
         })
     }

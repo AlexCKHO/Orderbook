@@ -43,5 +43,6 @@ pub struct OrderEntry {
 
 #[derive(Debug, Clone)]
 pub struct CancelEntry {
+    pub client_order_id: u64,
     pub engine_order_id: u64,
 }

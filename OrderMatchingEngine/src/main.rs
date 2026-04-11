@@ -17,12 +17,16 @@ use tonic::transport::Server;
 mod orderbook_grpc {
     tonic::include_proto!("orderbook");
 }
+use crate::orderbook_grpc::OrderAck;
 use orderbook_grpc::matching_engine_server::MatchingEngineServer;
+
 mod config;
 mod infrastructure;
 mod mappers;
 mod models;
 mod services;
+
+pub type EnginePayload = (Vec<EngineAction>, Option<oneshot::Sender<Vec<OrderAck>>>);
 
 #[tokio::main]
 async fn main() {
@@ -32,7 +36,7 @@ async fn main() {
     let tps_counter = Arc::new(AtomicU64::new(0));
 
     // main.rs
-    let (inbound_tx, inbound_rx) = mpsc::channel::<Vec<EngineAction>>(128);
+    let (inbound_tx, inbound_rx) = mpsc::channel::<Vec<EnginePayload>>(128);
     let (dispatcher_tx, mut dispatcher_rx) = mpsc::channel::<Vec<(MatchEvent, u64)>>(2048);
     let (kafka_tx, kafka_rx) = mpsc::channel::<Vec<(MatchEvent, u64)>>(8192);
 
