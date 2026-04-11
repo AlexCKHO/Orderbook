@@ -18,7 +18,7 @@ enum CancelRejectReason {
   ORDER_NOT_FOUND = 1;
 }
 
-message OrderRequest {  
+message OrderRequest {
   fixed64 client_id = 1;
   fixed64 price = 2;
   fixed64 qty = 3;
@@ -28,7 +28,7 @@ message OrderRequest {
 }
 
 message CancelRequest {
-  fixed64 client_id = 1;
+  fixed64 engine_order_id = 1;
   int64 timestamp = 6;
 }
 
@@ -43,52 +43,54 @@ message EngineBatchCommand {
   repeated EngineCommand commands = 1;
 }
 
-message OrderPlaced { 
-  fixed64 client_id = 1; 
-  fixed64 price = 2; 
-  fixed64 qty = 3; 
-  Side side = 4; 
+message OrderPlaced {
+  fixed64 client_order_id = 1;
+  fixed64 engine_order_id = 2;
+  fixed64 price = 3;
+  fixed64 qty = 4;
+  Side side = 5;
 }
 
-message TradeExecuted { 
-  fixed64 maker_id = 1; 
-  fixed64 taker_id = 2; 
-  fixed64 price = 3; 
+message TradeExecuted {
+  fixed64 maker_engine_order_id = 1;
+  fixed64 taker_engine_order_id = 2;
+  fixed64 price = 3;
   fixed64 qty = 4;
   int64 timestamp = 5;
   Side taker_side = 6;
   fixed64 trade_id = 7;
 }
 
-message OrderCancelled { 
-  fixed64 client_id = 1; 
-  fixed64 cancelled_qty = 2; 
+message OrderCancelled {
+  fixed64 engine_order_id = 1;
+  fixed64 cancelled_qty = 2;
 }
 
-message OrderKilled { 
-  fixed64 client_id = 1; 
-  fixed64 killed_qty = 2; 
+message OrderKilled {
+  fixed64 client_order_id = 1;
+  fixed64 killed_qty = 2;
 }
 
-message CancelRejected { 
-  fixed64 client_id = 1; 
-  CancelRejectReason reason = 2; 
+message CancelRejected {
+  fixed64 engine_order_id = 1;
+  CancelRejectReason reason = 2;
 }
 
 message MatchEvent {
+  uint64 sequence = 1;
   oneof event_data {
-    OrderPlaced placed = 1;
-    TradeExecuted filled = 2;
-    OrderCancelled cancelled = 3;
-    OrderKilled killed = 4;
-    CancelRejected rejected = 5;
+    OrderPlaced placed = 2;
+    TradeExecuted filled = 3;
+    OrderCancelled cancelled = 4;
+    OrderKilled killed = 5;
+    CancelRejected rejected = 6;
   }
 }
 
 message OrderBatchResponse {
   bool success = 1;
   string message = 2;
-  uint64 queued_count = 3; 
+  uint64 queued_count = 3;
 }
 
 message SubscribeRequest {}
