@@ -16,6 +16,6 @@ public class MockMatchingEngineClient : IMatchingEngineClient
     public async Task<EngineCancelOrderResult> CancelOrderCommand(CancelOrderCommand cmd)
     {
         // await engine grpc pass cmd
-        return new EngineCancelOrderResult(Status.Submitted, cmd.OrderId);
+        return new EngineCancelOrderResult(Status.Submitted, cmd.ClientOrderId);
     }
 }

@@ -34,7 +34,7 @@ public class MockMatchingEngineClientTests
         Assert.Multiple(() =>
         {
             Assert.That(result.Status, Is.EqualTo(Status.Submitted));
-            Assert.That(result.OrderId, Is.EqualTo(command.OrderId));
+            Assert.That(result.OrderId, Is.EqualTo(command.ClientOrderId));
             Assert.That(result.RejectionCode, Is.Null);
             Assert.That(result.RejectionReason, Is.Null);
         });

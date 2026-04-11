@@ -1,9 +1,11 @@
 using Microsoft.EntityFrameworkCore;
+using Orderbook;
 using Trading.Oms.Api.Contracts;
 using Trading.Oms.Api.Oms.Domain.Interface;
 using Trading.Oms.Api.Oms.Domain.Services;
 using Trading.Oms.Application.Interfaces;
 using Trading.Oms.Application.Services;
+using Trading.Oms.Infrastructure.Grpc;
 using Trading.Oms.Infrastructure.Persistence;
 using Trading.Oms.Infrastructure.Repositories;
 using Trading.Oms.Infrastructure.Services;
@@ -17,15 +19,18 @@ public class Program
     {
         var builder = WebApplication.CreateBuilder(args);
 
-        string connString = builder.Configuration.GetConnectionString("OmsDatabase");
+        var connString = builder.Configuration.GetConnectionString("OmsDatabase");
+        var engineUrl = builder.Configuration.GetConnectionString("gRPCAddress");
 
-        // Add services to the container.
+        if (string.IsNullOrEmpty(connString) || string.IsNullOrEmpty(engineUrl))
+        {
+            throw new InvalidOperationException("Please set connection string or gRPC address.");
+        }
+
         builder.Services.AddControllers();
 
-        // Add services to the container.
         builder.Services.AddAuthorization();
 
-        // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
         builder.Services.AddEndpointsApiExplorer();
         builder.Services.AddSwaggerGen();
         builder.Services.AddControllers();
@@ -39,6 +44,11 @@ public class Program
         builder.Services.AddScoped<IPlaceOrderCommandHandler, PlaceOrderCommandHandler>();
         builder.Services.AddScoped<ICancelOrderCommandHandler, CancelOrderCommandHandler>();
         builder.Services.AddScoped<ICommandAuditRepository, CommandAuditRepository>();
+        builder.Services.AddGrpcClient<Orderbook.MatchingEngine.MatchingEngineClient>(o =>
+        {
+            o.Address = new Uri(engineUrl);
+        });
+        builder.Services.AddSingleton<IMatchingEngineClient, GrpcMatchingEngineClient>();
 
         var app = builder.Build();
         // Configure the HTTP request pipeline.

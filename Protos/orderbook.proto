@@ -19,7 +19,7 @@ enum CancelRejectReason {
 }
 
 message OrderRequest {
-  fixed64 client_id = 1;
+  fixed64 client_order_id = 1;
   fixed64 price = 2;
   fixed64 qty = 3;
   Side side = 4;
@@ -28,8 +28,9 @@ message OrderRequest {
 }
 
 message CancelRequest {
-  fixed64 engine_order_id = 1;
-  int64 timestamp = 6;
+  fixed64 client_order_id = 1;
+  fixed64 engine_order_id = 2;
+  int64 timestamp = 3;
 }
 
 message EngineCommand {
@@ -87,10 +88,15 @@ message MatchEvent {
   }
 }
 
+message OrderAck {
+  fixed64 client_order_id = 1;
+  fixed64 engine_order_id = 2;
+}
+
 message OrderBatchResponse {
   bool success = 1;
   string message = 2;
-  uint64 queued_count = 3;
+  repeated OrderAck acks = 3;
 }
 
 message SubscribeRequest {}

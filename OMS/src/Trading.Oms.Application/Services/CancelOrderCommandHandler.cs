@@ -33,7 +33,7 @@ public class CancelOrderCommandHandler(
 
         // 2. Idempotency Check
 
-        var currentCmdHash = _hashingService.HashCancelOrderCommand(cmd.AccountId, cmd.OrderId);
+        var currentCmdHash = _hashingService.HashCancelOrderCommand(cmd.AccountId, cmd.ClientOrderId);
 
         var record = await _idempotencyRepository.GetAsync(scope, cmd.AccountId, cmd.IdempotencyKey, token);
 
@@ -61,7 +61,7 @@ public class CancelOrderCommandHandler(
             RequestId = cmd.RequestId,
             CorrelationId = cmd.CorrelationId,
             IdempotencyKey = cmd.IdempotencyKey,
-            OrderId = (long)cmd.OrderId,
+            OrderId = (long)cmd.ClientOrderId,
             AccountId = cmd.AccountId,
             CommandType = CommandType.CancelOrder,
             PayloadHash = currentCmdHash,
@@ -96,7 +96,7 @@ public class CancelOrderCommandHandler(
                 token
             );
 
-            await _commandAuditRepository.MarkCompletedAsync(cmd.RequestId, engineResult.Status, (long)cmd.OrderId,
+            await _commandAuditRepository.MarkCompletedAsync(cmd.RequestId, engineResult.Status, (long)cmd.ClientOrderId,
                 engineResult.RejectionCode, engineResult.RejectionReason, completedAt, token);
 
             return finalResult;
@@ -121,9 +121,9 @@ public class CancelOrderCommandHandler(
     {
         if (cmd.AccountId <= 0)
             return (false, RejectionCode.InvalidAccountId, "Account ID is invalid.");
-        if (cmd.OrderId == 0)
+        if (cmd.ClientOrderId == 0)
             return (false, RejectionCode.InvalidOrderId, "Order ID is invalid.");
-        if (cmd.OrderId >> 32 != cmd.AccountId)
+        if (cmd.ClientOrderId >> 32 != cmd.AccountId)
             return (false, RejectionCode.InvalidOrderId, "Order ID is invalid.");
 
         return (true, null, null);
@@ -188,7 +188,7 @@ public class CancelOrderCommandHandler(
             idempotencyKey: cmd.IdempotencyKey,
             commandType: CommandType.CancelOrder,
             status: status,
-            orderId: cmd.OrderId,
+            orderId: cmd.ClientOrderId,
             rejectionCode: code,
             rejectionReason: reason,
             receivedAtUtc: cmd.SubmittedAtUtc
