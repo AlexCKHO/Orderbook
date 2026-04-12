@@ -86,20 +86,20 @@ public class CancelOrderCommandHandler(
 
             // 5. Completion
 
-            await Task.WhenAll(
-                _idempotencyRepository.CompleteAsync(
-                    reserve.Scope,
-                    reserve.AccountId,
-                    reserve.IdempotencyKey,
-                    _mapStatusToStatusCode(finalResult.Status),
-                    JsonSerializer.Serialize(finalResult),
-                    completedAt,
-                    token
-                ),
-                _commandAuditRepository.CompletedAsync(cmd.RequestId, engineResult.Status,
-                    (long)cmd.ClientOrderId, (long)cmd.EngineOrderId,
-                    engineResult.RejectionCode, engineResult.RejectionReason, completedAt, token)
+
+            await _idempotencyRepository.CompleteAsync(
+                reserve.Scope,
+                reserve.AccountId,
+                reserve.IdempotencyKey,
+                _mapStatusToStatusCode(finalResult.Status),
+                JsonSerializer.Serialize(finalResult),
+                completedAt,
+                token
             );
+            await _commandAuditRepository.CompletedAsync(cmd.RequestId, engineResult.Status,
+                (long)cmd.ClientOrderId, (long)cmd.EngineOrderId,
+                engineResult.RejectionCode, engineResult.RejectionReason, completedAt, token);
+
 
             return finalResult;
         }

@@ -25,8 +25,4 @@
       <ProjectReference Include="..\Trading.Oms.Application\Trading.Oms.Application.csproj" />
     </ItemGroup>
 
-    <ItemGroup>
-      <Folder Include="Middleware\" />
-    </ItemGroup>
-
 </Project>
