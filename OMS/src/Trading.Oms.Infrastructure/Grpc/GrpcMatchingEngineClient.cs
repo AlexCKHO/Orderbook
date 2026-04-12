@@ -9,10 +9,68 @@ using Trading.Oms.Application.Models;
 
 namespace Trading.Oms.Infrastructure.Grpc;
 
+// ==================================================================================
+// ARCHITECTURAL FLOW: ASYNCHRONOUS COORDINATION PATTERN
+// ==================================================================================
+// Write Flow:
+// [PlaceOrderCommand] --(Enqueue/Park)--> [_commandChannel] --(Batch/Dequeue)--> [WriteLoopAsync] --(WriteAsync)--> [gRPC Stream]
+//
+// Read Flow
+// [gRPC Stream] --(ReadAll)--> [ReadLoopAsync] --(Match ID)--> [Dictionary/TCS] --(SetResult)--> [Original Task Wakes Up]
+//
+// 1. WRITING FLOW (Producer):
+//    - PlaceOrderCommand: Enqueues an 'EngineCommand' into the internal '_commandChannel'
+//      and registers a 'TaskCompletionSource' (TCS) in the pending tracking dictionary.
+//      It then awaits the TCS.Task, effectively "parking" the caller thread.
+//    - WriteLoopAsync: Acts as a dedicated consumer that drains the '_commandChannel',
+//      performs micro-batching, and flushes the commands to the gRPC request stream.
+//
+// 2. READING FLOW (Consumer & Matcher):
+//    - ReadLoopAsync: Continuously monitors the incoming gRPC response stream.
+//    - Reconciliation: Upon receiving an Ack, it uses the 'client_order_id' to perform
+//      an atomic 'TryRemove' from the tracking dictionaries (_pendingPlaceOrders/_pendingCancelOrders).
+//    - Resolution: If a matching TCS is found, it manually transitions the Task to a
+//      completed state by setting the result. This "wakes up" the original caller thread.
+//
+// 3. TASKCOMPLETIONSOURCE (The Bridge):
+//    - Unlike standard async methods (like DB calls) where the runtime manages completion,
+//      TCS gives us manual control over the Task's lifecycle. 
+//    - It bridges the gap between the decoupled Request-Stream and Response-Stream,
+//      allowing a multi-threaded system to reconcile asynchronous results.
+// ==================================================================================
+
+/*
+   [ 1. USER CALL ]
+            |
+    PlaceOrderCommand() 
+            |
+   (A) Create TCS & Add to        [ 5. TASK COMPLETION ]
+       _pendingPlaceOrders  <---------- TryRemove TCS & 
+            |                           SetResult(ack)
+            |                                 ^
+   (B) Write to channel                       |
+       _commandChannel                        |
+            |                                 |
+            v                         [ 4. READ LOOP ]
+    [ 2. WRITE LOOP ]                 ReadLoopAsync()
+     WriteLoopAsync()                         ^
+            |                                 |
+    (C) Micro-batching                        |
+        & WriteAsync                          |
+            |                                 |
+            v                                 |
+     +================================================+
+     |             3. gRPC STREAM (The Border)        |
+     |  Outbound Request  ---------->  Inbound Ack    |
+     +================================================+
+*/
+
+
+
 public class GrpcMatchingEngineClient : IMatchingEngineClient, IDisposable
 {
     private readonly AsyncDuplexStreamingCall<EngineBatchCommand, OrderBatchResponse> _stream;
-
+     
     private readonly ConcurrentDictionary<ulong, TaskCompletionSource<EnginePlaceOrderResult>> _pendingPlaceOrders =
         new();
 
@@ -20,6 +78,7 @@ public class GrpcMatchingEngineClient : IMatchingEngineClient, IDisposable
         new();
 
 
+    // MPSC like channel for sending commands from api to gRPC 
     private readonly Channel<EngineCommand> _commandChannel =
         System.Threading.Channels.Channel.CreateUnbounded<EngineCommand>();
 
@@ -111,7 +170,7 @@ public class GrpcMatchingEngineClient : IMatchingEngineClient, IDisposable
                         var status = response.Success
                             ? Domain.Enums.Status.Submitted
                             : Domain.Enums.Status.Rejected;
-                        placeTcs.TrySetResult(new EnginePlaceOrderResult(status, ack.ClientOrderId, null, null));
+                        placeTcs.TrySetResult(new EnginePlaceOrderResult(status, ack.ClientOrderId, ack.EngineOrderId));
                     }
 
                     else if (_pendingCancelOrders.TryRemove(ack.EngineOrderId, out var cancelTcs))
@@ -120,7 +179,7 @@ public class GrpcMatchingEngineClient : IMatchingEngineClient, IDisposable
                             ? Domain.Enums.Status.Submitted
                             : Domain.Enums.Status.Rejected;
                         cancelTcs.TrySetResult(
-                            new EngineCancelOrderResult(status, ack.ClientOrderId, null, null));
+                            new EngineCancelOrderResult(status, ack.ClientOrderId));
                     }
                 }
             }
@@ -135,23 +194,22 @@ public class GrpcMatchingEngineClient : IMatchingEngineClient, IDisposable
     private void FailAllPending()
     {
         foreach (var tcs in _pendingPlaceOrders.Values)
-            tcs.TrySetResult(new EnginePlaceOrderResult(Domain.Enums.Status.Failed, null,
-                null));
+            tcs.TrySetResult(new EnginePlaceOrderResult(Domain.Enums.Status.Failed, null, null));
 
         _pendingPlaceOrders.Clear();
     }
 
     // Helper Mappers
-    private Orderbook.Side MapSide(Domain.Enums.Side side) =>
-        side == Domain.Enums.Side.Bid ? Orderbook.Side.Bid : Orderbook.Side.Ask;
+    private Side MapSide(Domain.Enums.Side side) =>
+        side == Domain.Enums.Side.Bid ? Side.Bid : Side.Ask;
 
-    private Orderbook.OrderType MapOrderType(Domain.Enums.OrderType type) =>
-        type == Domain.Enums.OrderType.Limit ? Orderbook.OrderType.Limit : Orderbook.OrderType.Market;
+    private OrderType MapOrderType(Domain.Enums.OrderType type) =>
+        type == Domain.Enums.OrderType.Limit ? OrderType.Limit : OrderType.Market;
 
     public void Dispose()
     {
         _cts.Cancel();
-        _stream?.Dispose();
+        _stream.Dispose();
         _cts.Dispose();
     }
 }

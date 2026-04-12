@@ -9,14 +9,16 @@ public class CommandAckResult
     public string IdempotencyKey { get; }
     public CommandType CommandType { get; }
     public Status Status { get; }
-    public ulong? OrderId { get; }
+    public ulong? ClientOrderId { get; }
+    public ulong? EngineOrderId { get; }
     public RejectionCode? RejectionCode { get; }
     public string? RejectionReason { get; }
 
     public DateTimeOffset ReceivedAtUtc { get; }
 
     public CommandAckResult(string requestId, string correlationId, string idempotencyKey, CommandType commandType,
-        Status status, ulong? orderId, RejectionCode? rejectionCode, string? rejectionReason,
+        Status status, ulong? clientOrderId, ulong? engineOrderId, RejectionCode? rejectionCode,
+        string? rejectionReason,
         DateTimeOffset receivedAtUtc)
     {
         RequestId = requestId;
@@ -24,7 +26,8 @@ public class CommandAckResult
         IdempotencyKey = idempotencyKey;
         CommandType = commandType;
         Status = status;
-        OrderId = orderId;
+        ClientOrderId = clientOrderId;
+        EngineOrderId = engineOrderId;
         RejectionCode = rejectionCode;
         RejectionReason = rejectionReason;
         ReceivedAtUtc = receivedAtUtc;

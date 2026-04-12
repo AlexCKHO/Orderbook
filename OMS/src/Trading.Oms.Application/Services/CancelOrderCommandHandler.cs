@@ -21,7 +21,6 @@ public class CancelOrderCommandHandler(
 
     public async Task<CommandAckResult> HandleAsync(CancelOrderCommand cmd, CancellationToken token)
     {
-        
         const string scope = "POST:/api/orders/cancel";
 
         var (isValid, rejectCode, reason) = _validate(cmd);
@@ -70,14 +69,13 @@ public class CancelOrderCommandHandler(
             SubmittedAtUtc = cmd.SubmittedAtUtc,
         };
 
-       
 
         // 4. Execution
 
         try
         {
             await _commandAuditRepository.InsertReceivedAsync(commandAudit, token);
-            
+
             var engineResult = await _matchingEngineClient.CancelOrderCommand(cmd);
 
             var completedAt = DateTimeOffset.UtcNow;
@@ -96,7 +94,8 @@ public class CancelOrderCommandHandler(
                 token
             );
 
-            await _commandAuditRepository.MarkCompletedAsync(cmd.RequestId, engineResult.Status, (long)cmd.ClientOrderId,
+            await _commandAuditRepository.MarkCompletedAsync(cmd.RequestId, engineResult.Status,
+                (long)cmd.ClientOrderId,
                 engineResult.RejectionCode, engineResult.RejectionReason, completedAt, token);
 
             return finalResult;
@@ -188,7 +187,8 @@ public class CancelOrderCommandHandler(
             idempotencyKey: cmd.IdempotencyKey,
             commandType: CommandType.CancelOrder,
             status: status,
-            orderId: cmd.ClientOrderId,
+            clientOrderId: cmd.ClientOrderId,
+            engineOrderId: cmd.EngineOrderId,
             rejectionCode: code,
             rejectionReason: reason,
             receivedAtUtc: cmd.SubmittedAtUtc

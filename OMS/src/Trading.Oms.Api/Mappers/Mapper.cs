@@ -34,7 +34,8 @@ public class Mapper
             IdempotencyKey: cmd.IdempotencyKey,
             CommandType: result.CommandType,
             Status: result.Status,
-            OrderId: result.OrderId,
+            ClientOrderId: result.ClientOrderId,
+            EngineOrderId: result.EngineOrderId,
             RejectionCode: result.RejectionCode,
             RejectionReason: result.RejectionReason,
             ReceivedAtUtc: result.ReceivedAtUtc
@@ -51,7 +52,8 @@ public class Mapper
             IdempotencyKey: cmd.IdempotencyKey,
             CommandType: result.CommandType,
             Status: result.Status,
-            OrderId: result.OrderId,
+            ClientOrderId: result.ClientOrderId,
+            EngineOrderId: cmd.EngineOrderId,
             RejectionCode: result.RejectionCode,
             RejectionReason: result.RejectionReason,
             ReceivedAtUtc: result.ReceivedAtUtc

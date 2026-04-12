@@ -37,7 +37,7 @@ public class PlaceOrderCommandHandler(
         var (isValid, rejectCode, reason) = _validate(cmd);
         if (!isValid)
         {
-            return _createResult(cmd, Status.Rejected, null, rejectCode, reason);
+            return _createResult(cmd, Status.Rejected, null, null, rejectCode, reason);
         }
 
         var currentCmdHash = _hashingService.HashPlaceOrderCommand(
@@ -79,21 +79,21 @@ public class PlaceOrderCommandHandler(
             SubmittedAtUtc = cmd.SubmittedAtUtc,
         };
 
-      
 
         // 4. Execution
 
         try
         {
             await _commandAuditRepository.InsertReceivedAsync(commandAudit, token);
-            
+
             var sequence = await _orderSequenceAllocator.AllocateNextSequenceForAccount(cmd.AccountId);
-            var orderId = _orderIdComposer.Compose(cmd.AccountId, sequence);
+            var clientOrderId = _orderIdComposer.Compose(cmd.AccountId, sequence);
 
-            var engineResult = await _matchingEngineClient.PlaceOrderCommand(cmd, orderId);
+            var engineResult = await _matchingEngineClient.PlaceOrderCommand(cmd, clientOrderId);
 
 
-            var finalResult = _createResult(cmd, engineResult.Status, orderId, engineResult.RejectionCode,
+            var finalResult = _createResult(cmd, engineResult.Status, clientOrderId, engineResult.EngineOrderId,
+                engineResult.RejectionCode,
                 engineResult.RejectionReason);
 
             DateTimeOffset completedAt = DateTimeOffset.UtcNow;
@@ -109,7 +109,7 @@ public class PlaceOrderCommandHandler(
                 token
             );
 
-            await _commandAuditRepository.MarkCompletedAsync(cmd.RequestId, engineResult.Status, (long)orderId,
+            await _commandAuditRepository.MarkCompletedAsync(cmd.RequestId, engineResult.Status, (long)clientOrderId,
                 engineResult.RejectionCode, engineResult.RejectionReason, completedAt, token);
 
 
@@ -213,7 +213,8 @@ public class PlaceOrderCommandHandler(
     private static CommandAckResult _createResult(
         PlaceOrderCommand cmd,
         Status status,
-        ulong? orderId = null,
+        ulong? clientOrderId = null,
+        ulong? engineOrderId = null,
         RejectionCode? code = null,
         string? reason = null)
     {
@@ -223,7 +224,8 @@ public class PlaceOrderCommandHandler(
             idempotencyKey: cmd.IdempotencyKey,
             commandType: CommandType.PlaceOrder,
             status: status,
-            orderId: orderId,
+            clientOrderId: clientOrderId,
+            engineOrderId: engineOrderId,
             rejectionCode: code,
             rejectionReason: reason,
             receivedAtUtc: cmd.SubmittedAtUtc

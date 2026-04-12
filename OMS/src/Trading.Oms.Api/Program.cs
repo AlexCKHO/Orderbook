@@ -1,6 +1,5 @@
 using Microsoft.EntityFrameworkCore;
 using Orderbook;
-using Trading.Oms.Api.Contracts;
 using Trading.Oms.Api.Oms.Domain.Interface;
 using Trading.Oms.Api.Oms.Domain.Services;
 using Trading.Oms.Application.Interfaces;
@@ -44,7 +43,7 @@ public class Program
         builder.Services.AddScoped<IPlaceOrderCommandHandler, PlaceOrderCommandHandler>();
         builder.Services.AddScoped<ICancelOrderCommandHandler, CancelOrderCommandHandler>();
         builder.Services.AddScoped<ICommandAuditRepository, CommandAuditRepository>();
-        builder.Services.AddGrpcClient<Orderbook.MatchingEngine.MatchingEngineClient>(o =>
+        builder.Services.AddGrpcClient<MatchingEngine.MatchingEngineClient>(o =>
         {
             o.Address = new Uri(engineUrl);
         });
