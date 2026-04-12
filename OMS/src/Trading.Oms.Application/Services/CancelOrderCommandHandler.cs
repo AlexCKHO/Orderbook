@@ -60,7 +60,8 @@ public class CancelOrderCommandHandler(
             RequestId = cmd.RequestId,
             CorrelationId = cmd.CorrelationId,
             IdempotencyKey = cmd.IdempotencyKey,
-            OrderId = (long)cmd.ClientOrderId,
+            ClientOrderId = (long)cmd.ClientOrderId,
+            EngineOrderId = (long)cmd.EngineOrderId,
             AccountId = cmd.AccountId,
             CommandType = CommandType.CancelOrder,
             PayloadHash = currentCmdHash,
@@ -94,8 +95,8 @@ public class CancelOrderCommandHandler(
                 token
             );
 
-            await _commandAuditRepository.MarkCompletedAsync(cmd.RequestId, engineResult.Status,
-                (long)cmd.ClientOrderId,
+            await _commandAuditRepository.CompletedAsync(cmd.RequestId, engineResult.Status,
+                (long)cmd.ClientOrderId, (long)cmd.EngineOrderId,
                 engineResult.RejectionCode, engineResult.RejectionReason, completedAt, token);
 
             return finalResult;
@@ -109,7 +110,7 @@ public class CancelOrderCommandHandler(
                 DateTimeOffset.UtcNow,
                 token);
 
-            await _commandAuditRepository.MarkFailedAsync(cmd.RequestId, Status.Failed, ex.Message,
+            await _commandAuditRepository.MarkFailedAsync(cmd.RequestId, Status.Failed, cmd.ClientOrderId, ex.Message,
                 DateTimeOffset.UtcNow, token);
 
             throw;

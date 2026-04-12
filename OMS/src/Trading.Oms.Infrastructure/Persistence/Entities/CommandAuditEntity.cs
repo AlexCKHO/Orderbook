@@ -11,7 +11,8 @@ public class CommandAuditEntity
     public required string CorrelationId { get; set; }
     public required string IdempotencyKey { get; set; }
     public required uint AccountId { get; set; }
-    public long? OrderId { get; set; }
+    public long? ClientOrderId { get; set; }
+    public long? EngineOrderId { get; set; }
     public required CommandType CommandType { get; set; }
     public required string PayloadHash { get; set; }
     public required string RequestPayloadJson { get; set; }
@@ -20,6 +21,4 @@ public class CommandAuditEntity
     public string? RejectionReason { get; set; }
     public required DateTimeOffset SubmittedAtUtc { get; set; }
     public DateTimeOffset? CompletedAtUtc { get; set; }
-
-    
 }

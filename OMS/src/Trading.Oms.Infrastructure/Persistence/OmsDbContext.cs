@@ -36,12 +36,12 @@ public class OmsDbContext : DbContext
         modelBuilder.Entity<CommandAuditEntity>(entity =>
         {
             entity.ToTable("command_audits");
-            entity.HasKey(e => e.Id); 
+            entity.HasKey(e => e.Id);
             entity.Property(e => e.Id)
                 .UseIdentityByDefaultColumn();
-            
+
             entity.HasIndex(e => e.RequestId)
-                .IsUnique(); 
+                .IsUnique();
 
             entity.Property(e => e.RequestId).HasMaxLength(50).IsRequired();
             entity.Property(e => e.CorrelationId).HasMaxLength(50).IsRequired();

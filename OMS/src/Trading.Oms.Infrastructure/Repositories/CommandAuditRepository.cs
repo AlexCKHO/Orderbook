@@ -8,9 +8,9 @@ using Trading.Oms.Infrastructure.Persistence.Entities;
 
 namespace Trading.Oms.Infrastructure.Repositories;
 
-public class CommandAuditRepository(OmsDbContext _dbContext) : ICommandAuditRepository
+public class CommandAuditRepository(OmsDbContext dbContext) : ICommandAuditRepository
 {
-    readonly DbSet<CommandAuditEntity> _commandAuditEntitySet = _dbContext.Set<CommandAuditEntity>();
+    readonly DbSet<CommandAuditEntity> _commandAuditEntitySet = dbContext.Set<CommandAuditEntity>();
 
     public async Task InsertReceivedAsync(CommandAudit audit, CancellationToken token)
     {
@@ -25,7 +25,8 @@ public class CommandAuditRepository(OmsDbContext _dbContext) : ICommandAuditRepo
             RequestPayloadJson = audit.RequestPayloadJson,
             SubmittedAtUtc = audit.SubmittedAtUtc,
             CompletedAtUtc = audit.CompletedAtUtc,
-            OrderId = audit.OrderId,
+            ClientOrderId = audit.ClientOrderId,
+            EngineOrderId = audit.EngineOrderId,
             Status = audit.Status
         };
 
@@ -33,7 +34,7 @@ public class CommandAuditRepository(OmsDbContext _dbContext) : ICommandAuditRepo
         {
             _commandAuditEntitySet.Add(record);
 
-            await _dbContext.SaveChangesAsync(token);
+            await dbContext.SaveChangesAsync(token);
         }
         catch (DbUpdateException ex)
         {
@@ -41,7 +42,7 @@ public class CommandAuditRepository(OmsDbContext _dbContext) : ICommandAuditRepo
         }
     }
 
-    public async Task MarkFailedAsync(string requestId, Status status, string? rejectionReason,
+    public async Task MarkFailedAsync(string requestId, Status status, ulong? clientOrderId, string? rejectionReason,
         DateTimeOffset completedAt, CancellationToken token)
     {
         try
@@ -53,14 +54,14 @@ public class CommandAuditRepository(OmsDbContext _dbContext) : ICommandAuditRepo
                 throw new CommandAuditConflictException($"CommandAudit entity {requestId} not found");
             }
 
-
+            result.ClientOrderId = (long)clientOrderId;
             result.Status = status;
             result.CompletedAtUtc = completedAt;
             result.RejectionReason = rejectionReason;
 
             _commandAuditEntitySet.Update(result);
 
-            await _dbContext.SaveChangesAsync(token);
+            await dbContext.SaveChangesAsync(token);
         }
         catch (DbUpdateException ex)
         {
@@ -70,11 +71,11 @@ public class CommandAuditRepository(OmsDbContext _dbContext) : ICommandAuditRepo
 
     public async Task<CommandAuditEntity?> GetByRequestIdAsync(string requestId, CancellationToken token)
     {
-        return await _dbContext.command_audits
+        return await dbContext.command_audits
             .SingleOrDefaultAsync(x => x.RequestId == requestId, token);
     }
 
-    public async Task MarkCompletedAsync(string requestId, Status engineStatus, long orderId,
+    public async Task CompletedAsync(string requestId, Status engineStatus, long clientOrderId, long engineOrderId,
         RejectionCode? rejectionCode, string? rejectionReason, DateTimeOffset completedAtUtc, CancellationToken token)
     {
         try
@@ -86,15 +87,16 @@ public class CommandAuditRepository(OmsDbContext _dbContext) : ICommandAuditRepo
                 throw new CommandAuditConflictException($"CommandAudit request id: {requestId} not found");
             }
 
+            result.ClientOrderId = clientOrderId;
+            result.EngineOrderId = engineOrderId;
             result.Status = engineStatus;
-            result.OrderId = orderId;
             result.RejectionCode = rejectionCode;
             result.RejectionReason = rejectionReason;
             result.CompletedAtUtc = completedAtUtc;
 
             _commandAuditEntitySet.Update(result);
 
-            await _dbContext.SaveChangesAsync(token);
+            await dbContext.SaveChangesAsync(token);
         }
         catch (DbUpdateException ex)
         {

@@ -4,11 +4,11 @@ namespace Trading.Oms.Application.Models;
 
 public sealed record IdempotencyRecord
 {
-    public string Scope { get; set; }
+    public required string Scope { get; set; }
     public uint AccountId { get; set; }
-    public string IdempotencyKey { get; set; }
-    public string RequestId { get; set; }
-    public string RequestHash { get; set; }
+    public required string IdempotencyKey { get; set; }
+    public required string RequestId { get; set; }
+    public required string RequestHash { get; set; }
 
     public IdempotencyStates State { get; set; }
 

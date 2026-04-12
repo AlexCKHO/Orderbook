@@ -27,7 +27,7 @@ public class CommandAuditRepositoryTests
             Assert.That(saved.CorrelationId, Is.EqualTo(audit.CorrelationId));
             Assert.That(saved.IdempotencyKey, Is.EqualTo(audit.IdempotencyKey));
             Assert.That(saved.AccountId, Is.EqualTo(audit.AccountId));
-            Assert.That(saved.OrderId, Is.EqualTo(audit.OrderId));
+            Assert.That(saved.ClientOrderId, Is.EqualTo(audit.ClientOrderId));
             Assert.That(saved.CommandType, Is.EqualTo(audit.CommandType));
             Assert.That(saved.PayloadHash, Is.EqualTo(audit.PayloadHash));
             Assert.That(saved.RequestPayloadJson, Is.EqualTo(audit.RequestPayloadJson));
@@ -50,8 +50,8 @@ public class CommandAuditRepositoryTests
             correlationId: "correlation-2",
             idempotencyKey: "idempotency-2");
 
-        var exception = Assert.ThrowsAsync<CommandAuditConflictException>(
-            () => repository.InsertReceivedAsync(duplicate, CancellationToken.None));
+        var exception = Assert.ThrowsAsync<CommandAuditConflictException>(() =>
+            repository.InsertReceivedAsync(duplicate, CancellationToken.None));
 
         Assert.That(exception!.Message, Does.Contain("Duplicate Idempotency key"));
     }
@@ -71,8 +71,8 @@ public class CommandAuditRepositoryTests
 
         var repository = new CommandAuditRepository(dbContext.Object);
 
-        var exception = Assert.ThrowsAsync<CommandAuditConflictException>(
-            () => repository.InsertReceivedAsync(audit, token));
+        var exception =
+            Assert.ThrowsAsync<CommandAuditConflictException>(() => repository.InsertReceivedAsync(audit, token));
 
         Assert.Multiple(() =>
         {
@@ -123,6 +123,7 @@ public class CommandAuditRepositoryTests
         await repository.MarkFailedAsync(
             "request-1",
             Status.Failed,
+            null,
             "engine unavailable",
             TestData.CompletedAt,
             CancellationToken.None);
@@ -134,7 +135,7 @@ public class CommandAuditRepositoryTests
             Assert.That(saved.CompletedAtUtc, Is.EqualTo(TestData.CompletedAt));
             Assert.That(saved.RejectionReason, Is.EqualTo("engine unavailable"));
             Assert.That(saved.RejectionCode, Is.Null);
-            Assert.That(saved.OrderId, Is.Null);
+            Assert.That(saved.ClientOrderId, Is.Null);
         });
     }
 
@@ -144,13 +145,13 @@ public class CommandAuditRepositoryTests
         await using var database = await SqliteOmsDbContext.CreateAsync();
         var repository = new CommandAuditRepository(database.Context);
 
-        var exception = Assert.ThrowsAsync<CommandAuditConflictException>(
-            () => repository.MarkFailedAsync(
-                "missing-request",
-                Status.Failed,
-                "not found",
-                TestData.CompletedAt,
-                CancellationToken.None));
+        var exception = Assert.ThrowsAsync<CommandAuditConflictException>(() => repository.MarkFailedAsync(
+            "missing-request",
+            Status.Failed,
+            null,
+            "not found",
+            TestData.CompletedAt,
+            CancellationToken.None));
 
         Assert.That(exception!.Message, Does.Contain("missing-request"));
     }
@@ -163,10 +164,11 @@ public class CommandAuditRepositoryTests
         await database.Context.SaveChangesAsync();
         var repository = new CommandAuditRepository(database.Context);
 
-        await repository.MarkCompletedAsync(
+        await repository.CompletedAsync(
             "request-1",
             Status.Rejected,
-            orderId: 987654321,
+            clientOrderId: 987654321,
+            engineOrderId: 987654321,
             rejectionCode: RejectionCode.InvalidSymbol,
             rejectionReason: "invalid symbol",
             completedAtUtc: TestData.CompletedAt,
@@ -176,7 +178,7 @@ public class CommandAuditRepositoryTests
         Assert.Multiple(() =>
         {
             Assert.That(saved.Status, Is.EqualTo(Status.Rejected));
-            Assert.That(saved.OrderId, Is.EqualTo(987654321));
+            Assert.That(saved.ClientOrderId, Is.EqualTo(987654321));
             Assert.That(saved.RejectionCode, Is.EqualTo(RejectionCode.InvalidSymbol));
             Assert.That(saved.RejectionReason, Is.EqualTo("invalid symbol"));
             Assert.That(saved.CompletedAtUtc, Is.EqualTo(TestData.CompletedAt));
@@ -189,15 +191,15 @@ public class CommandAuditRepositoryTests
         await using var database = await SqliteOmsDbContext.CreateAsync();
         var repository = new CommandAuditRepository(database.Context);
 
-        var exception = Assert.ThrowsAsync<CommandAuditConflictException>(
-            () => repository.MarkCompletedAsync(
-                "missing-request",
-                Status.Submitted,
-                orderId: 987654321,
-                rejectionCode: null,
-                rejectionReason: null,
-                completedAtUtc: TestData.CompletedAt,
-                token: CancellationToken.None));
+        var exception = Assert.ThrowsAsync<CommandAuditConflictException>(() => repository.CompletedAsync(
+            "missing-request",
+            Status.Submitted,
+            clientOrderId: 987654321,
+            engineOrderId: 987654321,
+            rejectionCode: null,
+            rejectionReason: null,
+            completedAtUtc: TestData.CompletedAt,
+            token: CancellationToken.None));
 
         Assert.That(exception!.Message, Does.Contain("missing-request"));
     }

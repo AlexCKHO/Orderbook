@@ -7,7 +7,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Trading.Oms.Infrastructure.Migrations
 {
     /// <inheritdoc />
-    public partial class Initial_Oms_Schema : Migration
+    public partial class InitialCreate : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
@@ -16,13 +16,14 @@ namespace Trading.Oms.Infrastructure.Migrations
                 name: "command_audits",
                 columns: table => new
                 {
-                    RequestId = table.Column<string>(type: "character varying(50)", maxLength: 50, nullable: false),
                     Id = table.Column<long>(type: "bigint", nullable: false)
                         .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    RequestId = table.Column<string>(type: "character varying(50)", maxLength: 50, nullable: false),
                     CorrelationId = table.Column<string>(type: "character varying(50)", maxLength: 50, nullable: false),
                     IdempotencyKey = table.Column<string>(type: "character varying(100)", maxLength: 100, nullable: false),
                     AccountId = table.Column<long>(type: "bigint", nullable: false),
-                    OrderId = table.Column<long>(type: "bigint", nullable: true),
+                    ClientOrderId = table.Column<long>(type: "bigint", nullable: true),
+                    EngineOrderId = table.Column<long>(type: "bigint", nullable: true),
                     CommandType = table.Column<string>(type: "character varying(40)", maxLength: 40, nullable: false),
                     PayloadHash = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: false),
                     RequestPayloadJson = table.Column<string>(type: "jsonb", nullable: false),
@@ -34,7 +35,7 @@ namespace Trading.Oms.Infrastructure.Migrations
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_command_audits", x => x.RequestId);
+                    table.PrimaryKey("PK_command_audits", x => x.Id);
                 });
 
             migrationBuilder.CreateTable(
@@ -68,11 +69,6 @@ namespace Trading.Oms.Infrastructure.Migrations
                 table: "command_audits",
                 column: "RequestId",
                 unique: true);
-
-            migrationBuilder.CreateIndex(
-                name: "IX_command_audits_RequestId_CorrelationId_AccountId_SubmittedA~",
-                table: "command_audits",
-                columns: new[] { "RequestId", "CorrelationId", "AccountId", "SubmittedAtUtc" });
 
             migrationBuilder.CreateIndex(
                 name: "ix_idempotency_records_expires_at_utc",

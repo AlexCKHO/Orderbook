@@ -1,5 +1,5 @@
 using System.Text.Json;
-using Trading.Oms.Api.Oms.Domain.Interface;
+using Trading.Oms.Domain.Interface;
 using Trading.Oms.Application.Commands;
 using Trading.Oms.Application.Exceptions;
 using Trading.Oms.Application.Interfaces;
@@ -20,8 +20,8 @@ public class PlaceOrderCommandHandler(
     private readonly IOrderSequenceAllocator _orderSequenceAllocator = orderSequenceAllocator;
     private readonly IOrderIdComposer _orderIdComposer = orderIdComposer;
     private readonly IMatchingEngineClient _matchingEngineClient = matchingEngineClient;
-    private readonly IIdempotencyRepository _idempotencyRepository = idempotencyRepository;
     private readonly IHashingService _hashingService = hashingService;
+    private readonly IIdempotencyRepository _idempotencyRepository = idempotencyRepository;
     private readonly ICommandAuditRepository _commandAuditRepository = commandAuditRepository;
 
     public async Task<CommandAckResult> HandleAsync(PlaceOrderCommand cmd, CancellationToken token)
@@ -91,7 +91,6 @@ public class PlaceOrderCommandHandler(
 
             var engineResult = await _matchingEngineClient.PlaceOrderCommand(cmd, clientOrderId);
 
-
             var finalResult = _createResult(cmd, engineResult.Status, clientOrderId, engineResult.EngineOrderId,
                 engineResult.RejectionCode,
                 engineResult.RejectionReason);
@@ -109,7 +108,8 @@ public class PlaceOrderCommandHandler(
                 token
             );
 
-            await _commandAuditRepository.MarkCompletedAsync(cmd.RequestId, engineResult.Status, (long)clientOrderId,
+            await _commandAuditRepository.CompletedAsync(cmd.RequestId, engineResult.Status, (long)clientOrderId,
+                (long)engineResult.EngineOrderId,
                 engineResult.RejectionCode, engineResult.RejectionReason, completedAt, token);
 
 
@@ -124,7 +124,9 @@ public class PlaceOrderCommandHandler(
                 DateTimeOffset.UtcNow,
                 token);
 
-            await _commandAuditRepository.MarkFailedAsync(cmd.RequestId, Status.Failed, ex.Message,
+            await _commandAuditRepository.MarkFailedAsync(cmd.RequestId, Status.Failed,
+                null,
+                ex.Message,
                 DateTimeOffset.UtcNow, token);
 
             throw;

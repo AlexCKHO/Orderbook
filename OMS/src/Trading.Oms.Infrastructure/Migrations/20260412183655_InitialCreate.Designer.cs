@@ -12,8 +12,8 @@ using Trading.Oms.Infrastructure.Persistence;
 namespace Trading.Oms.Infrastructure.Migrations
 {
     [DbContext(typeof(OmsDbContext))]
-    [Migration("20260407204812_Initial_Oms_Schema")]
-    partial class Initial_Oms_Schema
+    [Migration("20260412183655_InitialCreate")]
+    partial class InitialCreate
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -27,11 +27,16 @@ namespace Trading.Oms.Infrastructure.Migrations
 
             modelBuilder.Entity("Trading.Oms.Infrastructure.Persistence.Entities.CommandAuditEntity", b =>
                 {
-                    b.Property<string>("RequestId")
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
 
                     b.Property<long>("AccountId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("ClientOrderId")
                         .HasColumnType("bigint");
 
                     b.Property<string>("CommandType")
@@ -47,19 +52,13 @@ namespace Trading.Oms.Infrastructure.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");
 
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
+                    b.Property<long?>("EngineOrderId")
                         .HasColumnType("bigint");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
 
                     b.Property<string>("IdempotencyKey")
                         .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
-
-                    b.Property<long?>("OrderId")
-                        .HasColumnType("bigint");
 
                     b.Property<string>("PayloadHash")
                         .IsRequired()
@@ -74,6 +73,11 @@ namespace Trading.Oms.Infrastructure.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)");
 
+                    b.Property<string>("RequestId")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
                     b.Property<string>("RequestPayloadJson")
                         .IsRequired()
                         .HasColumnType("jsonb");
@@ -86,14 +90,12 @@ namespace Trading.Oms.Infrastructure.Migrations
                     b.Property<DateTimeOffset>("SubmittedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
-                    b.HasKey("RequestId");
+                    b.HasKey("Id");
 
                     b.HasIndex("CorrelationId");
 
                     b.HasIndex("RequestId")
                         .IsUnique();
-
-                    b.HasIndex("RequestId", "CorrelationId", "AccountId", "SubmittedAtUtc");
 
                     b.ToTable("command_audits", (string)null);
                 });

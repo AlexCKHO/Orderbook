@@ -9,7 +9,8 @@ public class CommandAudit
     public required string CorrelationId { get; set; }
     public required string IdempotencyKey { get; set; }
     public required uint AccountId { get; set; }
-    public long? OrderId { get; set; }
+    public long? ClientOrderId { get; set; }
+    public long? EngineOrderId { get; set; }
     public required CommandType CommandType { get; set; }
     public required string PayloadHash { get; set; }
     public required string RequestPayloadJson { get; set; }

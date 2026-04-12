@@ -47,7 +47,8 @@ internal static class TestData
         string correlationId = "correlation-1",
         string idempotencyKey = "idempotency-1",
         uint accountId = 123,
-        long? orderId = null,
+        long? clientOrderId = null,
+        long? engineOrderId = null,
         CommandType commandType = CommandType.PlaceOrder,
         Status status = Status.Received)
     {
@@ -57,7 +58,8 @@ internal static class TestData
             CorrelationId = correlationId,
             IdempotencyKey = idempotencyKey,
             AccountId = accountId,
-            OrderId = orderId,
+            ClientOrderId = clientOrderId,
+            EngineOrderId = engineOrderId,
             CommandType = commandType,
             PayloadHash = "22FE290B946440CEC858E0BDB242D5209373066358FF8B74FC6C5CD0638C10A8",
             RequestPayloadJson = "{\"symbol\":\"BTC-USD\"}",
@@ -82,7 +84,7 @@ internal static class TestData
             CorrelationId = correlationId,
             IdempotencyKey = idempotencyKey,
             AccountId = accountId,
-            OrderId = orderId,
+            ClientOrderId = orderId,
             CommandType = commandType,
             PayloadHash = "22FE290B946440CEC858E0BDB242D5209373066358FF8B74FC6C5CD0638C10A8",
             RequestPayloadJson = "{\"symbol\":\"BTC-USD\"}",

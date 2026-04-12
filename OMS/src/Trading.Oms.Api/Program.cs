@@ -1,7 +1,8 @@
+using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Orderbook;
-using Trading.Oms.Api.Oms.Domain.Interface;
-using Trading.Oms.Api.Oms.Domain.Services;
+using Trading.Oms.Domain.Interface;
+using Trading.Oms.Domain.Services;
 using Trading.Oms.Application.Interfaces;
 using Trading.Oms.Application.Services;
 using Trading.Oms.Infrastructure.Grpc;
@@ -32,10 +33,17 @@ public class Program
 
         builder.Services.AddEndpointsApiExplorer();
         builder.Services.AddSwaggerGen();
-        builder.Services.AddControllers();
+
+        // Convert all the enum number to string 
+        //  1 => Submitted, 2 => Rejected 
+        builder.Services.AddControllers()
+            .AddJsonOptions(options =>
+            {
+                options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
+            });
 
         builder.Services.AddDbContext<OmsDbContext>(options => options.UseNpgsql(connString));
-        builder.Services.AddScoped<IOrderSequenceAllocator, MockOrderSequenceAllocator>();
+        builder.Services.AddSingleton<IOrderSequenceAllocator, MockOrderSequenceAllocator>();
         builder.Services.AddScoped<IOrderIdComposer, OrderIdComposer>();
         builder.Services.AddScoped<IMatchingEngineClient, MockMatchingEngineClient>();
         builder.Services.AddScoped<IIdempotencyRepository, IdempotencyRepository>();
@@ -43,10 +51,7 @@ public class Program
         builder.Services.AddScoped<IPlaceOrderCommandHandler, PlaceOrderCommandHandler>();
         builder.Services.AddScoped<ICancelOrderCommandHandler, CancelOrderCommandHandler>();
         builder.Services.AddScoped<ICommandAuditRepository, CommandAuditRepository>();
-        builder.Services.AddGrpcClient<MatchingEngine.MatchingEngineClient>(o =>
-        {
-            o.Address = new Uri(engineUrl);
-        });
+        builder.Services.AddGrpcClient<MatchingEngine.MatchingEngineClient>(o => { o.Address = new Uri(engineUrl); });
         builder.Services.AddSingleton<IMatchingEngineClient, GrpcMatchingEngineClient>();
 
         var app = builder.Build();

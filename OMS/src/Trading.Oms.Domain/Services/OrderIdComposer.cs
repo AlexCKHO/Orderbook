@@ -1,6 +1,6 @@
-using Trading.Oms.Api.Oms.Domain.Interface;
+using Trading.Oms.Domain.Interface;
 
-namespace Trading.Oms.Api.Oms.Domain.Services;
+namespace Trading.Oms.Domain.Services;
 
 public class OrderIdComposer : IOrderIdComposer
 {
