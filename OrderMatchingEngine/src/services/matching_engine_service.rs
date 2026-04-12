@@ -40,7 +40,7 @@ impl MatchingEngineService {
 
                 if let EngineAction::Create(ref mut order) = action {
                     let is_oms_order = (order.client_order_id & OMS_MASK) != 0;
-
+                        
                     if is_oms_order {
                         oms_engine_order_id_counter += 1;
                         order.engine_order_id = oms_engine_order_id_counter | OMS_MASK;
