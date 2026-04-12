@@ -4,5 +4,5 @@ public interface IOrderIdComposer
 {
     ulong Compose(uint accountId, uint sequence);
 
-    (uint accountId, uint sequence) Decompose(uint orderId);
+    (uint accountId, uint sequence) Decompose(ulong orderId);
 }
