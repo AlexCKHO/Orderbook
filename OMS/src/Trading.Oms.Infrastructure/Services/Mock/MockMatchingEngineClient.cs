@@ -10,12 +10,15 @@ public class MockMatchingEngineClient : IMatchingEngineClient
     public async Task<EnginePlaceOrderResult> PlaceOrderCommand(PlaceOrderCommand cmd, ulong orderId)
     {
         // await engine grpc pass cmd
-        return new EnginePlaceOrderResult(Status.Submitted, orderId);
+        // return new EnginePlaceOrderResult(Status.Submitted, orderId);
+
+        throw new NotImplementedException();
     }
 
     public async Task<EngineCancelOrderResult> CancelOrderCommand(CancelOrderCommand cmd)
     {
         // await engine grpc pass cmd
-        return new EngineCancelOrderResult(Status.Submitted, cmd.ClientOrderId);
+        // return new EngineCancelOrderResult(Status.Submitted, cmd.ClientOrderId);
+        throw new NotImplementedException();
     }
 }

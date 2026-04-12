@@ -6,9 +6,10 @@ using Trading.Oms.Application.Commands;
 using Trading.Oms.Application.Interfaces;
 using Trading.Oms.Application.Models;
 
+
 namespace Trading.Oms.Infrastructure.Grpc;
 
-public class GrpcMatchingEngineClient : IMatchingEngineClient
+public class GrpcMatchingEngineClient : IMatchingEngineClient, IDisposable
 {
     private readonly AsyncDuplexStreamingCall<EngineBatchCommand, OrderBatchResponse> _stream;
 
@@ -18,6 +19,7 @@ public class GrpcMatchingEngineClient : IMatchingEngineClient
     private readonly ConcurrentDictionary<ulong, TaskCompletionSource<EngineCancelOrderResult>> _pendingCancelOrders =
         new();
 
+
     private readonly Channel<EngineCommand> _commandChannel =
         System.Threading.Channels.Channel.CreateUnbounded<EngineCommand>();
 
@@ -25,28 +27,74 @@ public class GrpcMatchingEngineClient : IMatchingEngineClient
 
     public GrpcMatchingEngineClient(MatchingEngine.MatchingEngineClient client)
     {
-        // 1. 初始化時就開啟持久 Stream
+        // 1. Initiating gRPC connection
         _stream = client.PlaceBatchStream(cancellationToken: _cts.Token);
 
-        // 2. 啟動背景任務
+        // 2. Initiating pipe for writing and reading
         _ = Task.Run(WriteLoopAsync);
         _ = Task.Run(ReadLoopAsync);
     }
 
+    // API Entry: Place
+    public async Task<EnginePlaceOrderResult> PlaceOrderCommand(PlaceOrderCommand cmd, ulong orderId)
+    {
+        var tcs = new TaskCompletionSource<EnginePlaceOrderResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _pendingPlaceOrders.TryAdd(orderId, tcs);
+
+        var protoOrder = new OrderRequest
+        {
+            ClientOrderId = orderId,
+            Price = cmd.Price ?? 0,
+            Qty = cmd.Quantity,
+            Side = MapSide(cmd.Side),
+            OrderType = MapOrderType(cmd.OrderType),
+            Timestamp = cmd.SubmittedAtUtc.ToUnixTimeMilliseconds()
+        };
+
+
+        await _commandChannel.Writer.WriteAsync(new EngineCommand { PlaceOrder = protoOrder });
+
+        return await tcs.Task;
+    }
+
+    // API Entry: Cancel
+    public async Task<EngineCancelOrderResult> CancelOrderCommand(CancelOrderCommand cmd)
+    {
+        var tcs = new TaskCompletionSource<EngineCancelOrderResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        _pendingCancelOrders.TryAdd(cmd.EngineOrderId, tcs);
+
+        var protoCancel = new CancelRequest
+        {
+            EngineOrderId = cmd.EngineOrderId,
+            Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+        };
+
+        await _commandChannel.Writer.WriteAsync(new EngineCommand { CancelOrder = protoCancel });
+
+        return await tcs.Task;
+    }
+
     private async Task WriteLoopAsync()
     {
-        await foreach (var command in _commandChannel.Reader.ReadAllAsync(_cts.Token))
+        try
         {
-            var batch = new EngineBatchCommand();
-            batch.Commands.Add(command);
-
-            // 這裡可以做 Micro-batching: 趁現在還有單，一次過掃走
-            while (batch.Commands.Count < 100 && _commandChannel.Reader.TryRead(out var next))
+            await foreach (var command in _commandChannel.Reader.ReadAllAsync(_cts.Token))
             {
-                batch.Commands.Add(next);
-            }
+                var batch = new EngineBatchCommand();
+                batch.Commands.Add(command);
 
-            await _stream.RequestStream.WriteAsync(batch);
+                while (batch.Commands.Count < 100 && _commandChannel.Reader.TryRead(out var next))
+                {
+                    batch.Commands.Add(next);
+                }
+
+                await _stream.RequestStream.WriteAsync(batch);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Write Loop Error: {ex.Message}");
         }
     }
 
@@ -56,15 +104,24 @@ public class GrpcMatchingEngineClient : IMatchingEngineClient
         {
             await foreach (var response in _stream.ResponseStream.ReadAllAsync(_cts.Token))
             {
-                // 根據你改好的 Proto，現在 Response 裡面應該有 acked_client_ids
-                foreach (var clientId in response.Message.)
+                foreach (var ack in response.Acks)
                 {
-                    if (_pendingPlaceOrders.TryRemove(clientId, out var tcs))
+                    if (_pendingPlaceOrders.TryRemove(ack.ClientOrderId, out var placeTcs))
                     {
-                        var status = response.Success ? Status.Submitted : Status.Rejected;
-                        tcs.TrySetResult(new EnginePlaceOrderResult(status, null, response.Message));
+                        var status = response.Success
+                            ? Domain.Enums.Status.Submitted
+                            : Domain.Enums.Status.Rejected;
+                        placeTcs.TrySetResult(new EnginePlaceOrderResult(status, ack.ClientOrderId, null, null));
                     }
-                    // 同樣處理 Cancel 邏輯...
+
+                    else if (_pendingCancelOrders.TryRemove(ack.EngineOrderId, out var cancelTcs))
+                    {
+                        var status = response.Success
+                            ? Domain.Enums.Status.Submitted
+                            : Domain.Enums.Status.Rejected;
+                        cancelTcs.TrySetResult(
+                            new EngineCancelOrderResult(status, ack.ClientOrderId, null, null));
+                    }
                 }
             }
         }
@@ -75,43 +132,26 @@ public class GrpcMatchingEngineClient : IMatchingEngineClient
         }
     }
 
-    public Task<EnginePlaceOrderResult> PlaceOrderCommand(PlaceOrderCommand cmd, ulong orderId)
+    private void FailAllPending()
     {
-        using var call = client.PlaceBatchStream();
+        foreach (var tcs in _pendingPlaceOrders.Values)
+            tcs.TrySetResult(new EnginePlaceOrderResult(Domain.Enums.Status.Failed, null,
+                null));
 
-        // Reading responses
-
-        var readTask = Task.Run(async () =>
-        {
-            try
-            {
-                await foreach (var response in call.ResponseStream.ReadAllAsync())
-                {
-                    if (!response.Success)
-                        continue;
-                }
-            }
-            catch (RpcException rpcException)
-            {
-                Console.WriteLine($"\n❌ Historical batch reader broke: {rpcException.Status.Detail}");
-            }
-        });
-        try
-        {
-            var batch = new EngineBatchCommand();
-            EngineCommand command = new EngineCommand();
-
-            command.PlaceOrder = cmd;
-
-            batch.Commands.Add(command);
-        }
-        catch (RpcException rpcException)
-        {
-        }
+        _pendingPlaceOrders.Clear();
     }
 
-    public Task<EngineCancelOrderResult> CancelOrderCommand(CancelOrderCommand cmd)
+    // Helper Mappers
+    private Orderbook.Side MapSide(Domain.Enums.Side side) =>
+        side == Domain.Enums.Side.Bid ? Orderbook.Side.Bid : Orderbook.Side.Ask;
+
+    private Orderbook.OrderType MapOrderType(Domain.Enums.OrderType type) =>
+        type == Domain.Enums.OrderType.Limit ? Orderbook.OrderType.Limit : Orderbook.OrderType.Market;
+
+    public void Dispose()
     {
-        throw new NotImplementedException();
+        _cts.Cancel();
+        _stream?.Dispose();
+        _cts.Dispose();
     }
 }

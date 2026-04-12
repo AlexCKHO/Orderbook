@@ -166,22 +166,22 @@ class Program
 
         var commands = engineCommands.ToArray();
 
-
-        try
-        {
-            engineCommands.ForEach(e =>
-            {
-                // Just access the property directly
-                if (e.PlaceOrder != null)
-                {
-                    Console.WriteLine(e.PlaceOrder.ToString());
-                }
-            });
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine(ex.Message);
-        }
+        // Print command details
+        // try
+        // {
+        //     engineCommands.ForEach(e =>
+        //     {
+        //         // Just access the property directly
+        //         if (e.PlaceOrder != null)
+        //         {
+        //             Console.WriteLine(e.PlaceOrder.ToString());
+        //         }
+        //     });
+        // }
+        // catch (Exception ex)
+        // {
+        //     Console.WriteLine(ex.Message);
+        // }
 
         Console.WriteLine($"✅ Loaded {commands.Length:N0} commands into RAM ready for benchmark.");
         Console.WriteLine();
@@ -260,7 +260,7 @@ class Program
                         latencies.Add(elapsedMs);
                     }
 
-                    Interlocked.Add(ref successCount, (long)response.QueuedCount);
+                    Interlocked.Add(ref successCount, (long)response.Acks.Count);
                 }
             }
             catch (RpcException ex)
@@ -368,7 +368,7 @@ class Program
                                 latencies.Add(elapsedMs);
                             }
 
-                            Interlocked.Add(ref successCount, (long)response.QueuedCount);
+                            Interlocked.Add(ref successCount, (long)response.Acks.Count);
                         }
                     }
                     catch (RpcException ex)
@@ -459,7 +459,7 @@ class Program
                         latencies.Add(elapsedMs);
                     }
 
-                    Interlocked.Add(ref successCount, (long)response.QueuedCount);
+                    Interlocked.Add(ref successCount, (long)response.Acks.Count);
                 }
             }
             catch (RpcException ex)
@@ -582,7 +582,7 @@ class Program
         {
             PlaceOrder = new OrderRequest
             {
-                ClientId = (ulong)(1_000_000 + index),
+                ClientOrderId = (ulong)(1_000_000 + index),
                 Price = (ulong)Random.Shared.Next(100, 201),
                 Qty = (ulong)Random.Shared.Next(1, 100),
                 Side = Random.Shared.Next(0, 2) == 0 ? Side.Bid : Side.Ask,

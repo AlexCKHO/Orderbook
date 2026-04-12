@@ -88,7 +88,7 @@ public class BinanceDataParser
                 {
                     PlaceOrder = new OrderRequest
                     {
-                        ClientId = _currentOrderId++,
+                        ClientOrderId = _currentOrderId++,
                         Price = price,
                         Qty = qty,
                         Side = side,
@@ -138,7 +138,7 @@ public class BinanceDataParser
                 {
                     PlaceOrder = new OrderRequest
                     {
-                        ClientId = newOrderId,
+                        ClientOrderId = newOrderId,
                         Price = price,
                         Qty = qty,
                         Side = side,

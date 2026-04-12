@@ -9,7 +9,9 @@ public class Mapper
 {
     public static CancelOrderCommand MapToCancelOrderCommand(CancelOrderRequest request, RequestMetadata metadata)
     {
-        return new CancelOrderCommand(request.AccountId, request.OrderId, metadata.RequestId, metadata.CorrelationId,
+        return new CancelOrderCommand(request.AccountId, request.ClientOrderId, request.EngineOrderId,
+            metadata.RequestId,
+            metadata.CorrelationId,
             metadata.IdempotencyKey,
             metadata.SubmittedAtUtc);
     }

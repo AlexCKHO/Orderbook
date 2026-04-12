@@ -33,11 +33,13 @@ internal static class TestData
     public static CancelOrderCommand CancelOrderCommand(
         uint accountId = 123,
         ulong orderId = 987654321,
+        ulong engineId = 987654321,
         string requestId = "request-cancel",
         string correlationId = "correlation-cancel",
         string idempotencyKey = "idempotency-cancel")
     {
-        return new CancelOrderCommand(accountId, orderId, requestId, correlationId, idempotencyKey, SubmittedAt);
+        return new CancelOrderCommand(accountId, orderId, engineId, requestId, correlationId, idempotencyKey,
+            SubmittedAt);
     }
 
     public static CommandAudit CommandAudit(
