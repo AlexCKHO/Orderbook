@@ -18,7 +18,6 @@ public class CancelOrderCommandHandler(
     private readonly IHashingService _hashingService = hashingService;
     private readonly ICommandAuditRepository _commandAuditRepository = commandAuditRepository;
 
-
     public async Task<CommandAckResult> HandleAsync(CancelOrderCommand cmd, CancellationToken token)
     {
         const string scope = "POST:/api/orders/cancel";
@@ -85,7 +84,6 @@ public class CancelOrderCommandHandler(
                 engineResult.RejectionReason);
 
             // 5. Completion
-
 
             await _idempotencyRepository.CompleteAsync(
                 reserve.Scope,
