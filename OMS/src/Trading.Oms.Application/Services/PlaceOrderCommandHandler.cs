@@ -91,26 +91,28 @@ public class PlaceOrderCommandHandler(
 
             var engineResult = await _matchingEngineClient.PlaceOrderCommand(cmd, clientOrderId);
 
+            DateTimeOffset completedAt = DateTimeOffset.UtcNow;
+
             var finalResult = _createResult(cmd, engineResult.Status, clientOrderId, engineResult.EngineOrderId,
                 engineResult.RejectionCode,
                 engineResult.RejectionReason);
 
-            DateTimeOffset completedAt = DateTimeOffset.UtcNow;
 
             // 5. Completion
-            await _idempotencyRepository.CompleteAsync(
-                reserve.Scope,
-                reserve.AccountId,
-                reserve.IdempotencyKey,
-                _mapStatusToStatusCode(finalResult.Status),
-                JsonSerializer.Serialize(finalResult),
-                completedAt,
-                token
+            await Task.WhenAll(
+                _idempotencyRepository.CompleteAsync(
+                    reserve.Scope,
+                    reserve.AccountId,
+                    reserve.IdempotencyKey,
+                    _mapStatusToStatusCode(finalResult.Status),
+                    JsonSerializer.Serialize(finalResult),
+                    completedAt,
+                    token
+                ),
+                _commandAuditRepository.CompletedAsync(cmd.RequestId, engineResult.Status, (long)clientOrderId,
+                    (long)engineResult.EngineOrderId,
+                    engineResult.RejectionCode, engineResult.RejectionReason, completedAt, token)
             );
-
-            await _commandAuditRepository.CompletedAsync(cmd.RequestId, engineResult.Status, (long)clientOrderId,
-                (long)engineResult.EngineOrderId,
-                engineResult.RejectionCode, engineResult.RejectionReason, completedAt, token);
 
 
             return finalResult;
