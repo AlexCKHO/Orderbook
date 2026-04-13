@@ -475,6 +475,11 @@ class Program
 
             long? batchTimestamp = null;
 
+
+            long sentCount = 0;
+            int total = commands.Length;
+            int updateInterval = Math.Max(1, total / 100);
+
             foreach (var command in commands)
             {
                 long? commandTimestamp = TryGetHistoricalTimestampMs(command);
@@ -493,6 +498,13 @@ class Program
                     batchSendTicks.Enqueue(Stopwatch.GetTimestamp());
                     await call.RequestStream.WriteAsync(batch);
 
+
+                    sentCount += batch.Commands.Count;
+                    if (sentCount >= updateInterval || sentCount == total)
+                    {
+                        DrawProgressBar(sentCount, total);
+                    }
+
                     batch = new EngineBatchCommand();
                     batch.Commands.Capacity = settings.BatchSize;
                     batchTimestamp = null;
@@ -503,6 +515,14 @@ class Program
 
                 batch.Commands.Add(command);
             }
+
+            if (batch.Commands.Count > 0)
+            {
+                sentCount += batch.Commands.Count;
+                DrawProgressBar(sentCount, total);
+            }
+
+            Console.WriteLine();
 
             if (batch.Commands.Count > 0)
             {
@@ -602,5 +622,19 @@ class Program
                 Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
             }
         };
+    }
+
+    private static void DrawProgressBar(long current, long total, int barSize = 40)
+    {
+        if (total == 0) return;
+
+        decimal progress = (decimal)current / total;
+        int progressChars = (int)(progress * barSize);
+
+        // [====>----------] 45%
+        string bar = new string('=', progressChars) + (progressChars < barSize ? ">" : "");
+        string spaces = new string('-', barSize - bar.Length);
+
+        Console.Write($"\rProgress: [{bar}{spaces}] {(progress * 100):F1}% ({current:N0}/{total:N0})");
     }
 }
