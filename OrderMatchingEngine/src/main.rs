@@ -2,23 +2,19 @@ use crate::config::AppConfig;
 use crate::infrastructure::grpc_gateway::GrpcGateway;
 use crate::infrastructure::redpanda_gateway::{RedpandaConsumer, RedpandaProducer};
 use crate::models::events::MatchEvent;
-use crate::models::order::EngineAction;
 use crate::services::dispatcher_service::DispatcherService;
 use crate::services::matching_engine_service::MatchingEngineService;
 use dotenvy::dotenv;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
+use std::sync::atomic::AtomicU64;
 use tokio;
 use tokio::sync::mpsc;
-use tokio::time::interval;
 use tonic::transport::Server;
 
 mod orderbook_grpc {
     tonic::include_proto!("orderbook");
 }
 use crate::models::engine_payload::EnginePayload;
-use crate::orderbook_grpc::OrderAck;
 use orderbook_grpc::matching_engine_server::MatchingEngineServer;
 
 mod config;
@@ -36,8 +32,8 @@ async fn main() {
 
     // main.rs
     let (inbound_tx, inbound_rx) = mpsc::channel::<EnginePayload>(128);
-    let (dispatcher_tx, mut dispatcher_rx) = mpsc::channel::<Vec<(MatchEvent, u64)>>(2048);
-    let (kafka_tx, kafka_rx) = mpsc::channel::<Vec<(MatchEvent, u64)>>(8192);
+    let (dispatcher_tx, mut dispatcher_rx) = mpsc::channel::<Vec<(MatchEvent, u64)>>(100_000);
+    let (kafka_tx, kafka_rx) = mpsc::channel::<Vec<(MatchEvent, u64)>>(100_000);
 
     // 1. Initialize handles as Options or empty vectors outside the if blocks
     let mut consumer_tasks = Vec::new();
@@ -45,9 +41,9 @@ async fn main() {
     let mut dispatcher_handle = None;
 
     // Receiving message from Kafka
-    let use_redpanda_consumer = false;
+    let use_redpanda_consumer = true;
     // Sending message to Kafka
-    let use_redpanda_producer = false;
+    let use_redpanda_producer = true;
 
     // Setting up kafka consumer
     if use_redpanda_consumer {

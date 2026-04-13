@@ -1,7 +1,12 @@
 use crate::models::engine_payload::EnginePayload;
 use crate::models::order_book::OrderBook;
+use std::fs;
+use std::fs::File;
+use std::io::{Read, Write};
+use std::os::unix::raw::time_t;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::SystemTime;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
 // Internal Models
@@ -20,8 +25,7 @@ impl MatchingEngineService {
     }
 
     pub async fn run_matching_actor(
-         self,
-
+        self,
         mut inbound_rx: mpsc::Receiver<EnginePayload>,
         counter: Arc<AtomicU64>,
     ) {
@@ -29,7 +33,7 @@ impl MatchingEngineService {
         let mut last_event_sequence: u64 = 0;
         let mut order_book = OrderBook::new(0);
 
-        let mut reusable_events_buffer: Vec<MatchEvent> = Vec::with_capacity(8192);
+        let mut reusable_events_buffer: Vec<MatchEvent> = Vec::with_capacity(8092);
 
         while let Some(payload) = inbound_rx.recv().await {
             let batch_size = payload.actions.len() as u64;
@@ -40,7 +44,7 @@ impl MatchingEngineService {
 
                 if let EngineAction::Create(ref mut order) = action {
                     let is_oms_order = (order.client_order_id & OMS_MASK) != 0;
-                        
+
                     if is_oms_order {
                         oms_engine_order_id_counter += 1;
                         order.engine_order_id = oms_engine_order_id_counter | OMS_MASK;
@@ -74,7 +78,8 @@ impl MatchingEngineService {
             // Section 1:
             // Call reply_tx to send OrderAck
             // To form the OrderBatchResponse
-
+            // last part of the gRPC
+            // rpc PlaceBatchStream (stream EngineBatchCommand) returns (stream OrderBatchResponse);
             if let Some(tx) = payload.reply_tx {
                 let _ = tx.send(acks);
             }
@@ -83,7 +88,6 @@ impl MatchingEngineService {
             // Send result to dispatcher
             if !reusable_events_buffer.is_empty() {
                 let event_batch = std::mem::take(&mut reusable_events_buffer);
-
                 let sequenced_batch: Vec<(MatchEvent, u64)> = event_batch
                     .into_iter()
                     .map(|evt| {
@@ -94,22 +98,44 @@ impl MatchingEngineService {
 
                 match self.dispatcher_tx.try_send(sequenced_batch) {
                     Ok(()) => {}
-                    Err(TrySendError::Full(batch)) => {
-                        if let Err(e) = self.dispatcher_tx.send(batch).await {
-                            eprintln!("Critical Error: Dispatcher channel closed: {}", e);
-                            break;
-                        }
+                    Err(TrySendError::Full(recovered_batch)) => {
+                        eprintln!("[Backpressure] Dispatcher full, journaling batch to disk...");
+                        let _ = emergency_log_to_disk(recovered_batch);
                     }
-                    Err(TrySendError::Closed(_)) => {
-                        eprintln!("Critical Error: Dispatcher channel closed");
+                    Err(TrySendError::Closed(recovered_batch)) => {
+                        eprintln!("Critical: Dispatcher closed!");
+                        let _ = emergency_log_to_disk(recovered_batch);
                         break;
                     }
                 }
 
-                reusable_events_buffer = Vec::with_capacity(8192);
+                reusable_events_buffer.clear();
             }
 
             counter.fetch_add(batch_size, Ordering::Relaxed);
         }
     }
+}
+
+pub async fn read_all_from_binary() -> bincode::Result<Vec<(MatchEvent, u64)>> {
+    let mut file = File::open("TempEventResult.bin").map_err(bincode::Error::from)?;
+    let mut all_events = Vec::new();
+
+    while let Ok(batch) = bincode::deserialize_from::<&File, Vec<(MatchEvent, u64)>>(&file) {
+        all_events.extend(batch);
+    }
+    Ok(all_events)
+}
+fn emergency_log_to_disk(match_event: Vec<(MatchEvent, u64)>) -> bincode::Result<()> {
+    use std::fs::OpenOptions;
+
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("TempEventResult.bin")
+        .map_err(bincode::Error::from)?;
+
+    let encoded: Vec<u8> = bincode::serialize(&match_event)?;
+    file.write_all(&encoded).map_err(bincode::Error::from)?;
+    Ok(())
 }

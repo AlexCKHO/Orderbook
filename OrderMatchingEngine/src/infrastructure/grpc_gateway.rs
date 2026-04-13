@@ -40,7 +40,7 @@ impl MatchingEngine for GrpcGateway {
                 match in_stream.message().await {
                     Ok(Some(engine_batch_command)) => {
                         let capacity = engine_batch_command.commands.len();
-                        println!("📦 [DEBUG] Received batch! Size: {}", capacity);
+                        // println!("📦 [DEBUG] Received batch! Size: {}", capacity);
 
                         let mut batch = Vec::with_capacity(capacity);
 

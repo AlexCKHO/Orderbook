@@ -192,7 +192,7 @@ impl OrderBook {
 
                 let current_trade_id = self.trade_id;
                 self.trade_id += 1;
-                println!("💵 Current price: {}", bid_price);
+               // println!("💵 Current price: {}", bid_price);
                 events.push(MatchEvent::TradeExecuted {
                     maker_engine_order_id: best_bid_order.engine_order_id,
                     taker_engine_order_id: new_ask_order.engine_order_id,
