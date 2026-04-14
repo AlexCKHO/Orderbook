@@ -14,9 +14,7 @@ pub struct OrderBook {
     // price, BookEntry
     pub asks: BTreeMap<u64, VecDeque<BookEntry>>,
     pub bids: BTreeMap<u64, VecDeque<BookEntry>>,
-    // (engine_order_id), (client_order_id, price, side)
     pub order_locations: HashMap<u64, (u64, u64, Side)>,
-    // ID for trade event
     pub trade_id: u64,
 }
 
@@ -192,7 +190,7 @@ impl OrderBook {
 
                 let current_trade_id = self.trade_id;
                 self.trade_id += 1;
-               // println!("💵 Current price: {}", bid_price);
+                // println!("💵 Current price: {}", bid_price);
                 events.push(MatchEvent::TradeExecuted {
                     maker_engine_order_id: best_bid_order.engine_order_id,
                     taker_engine_order_id: new_ask_order.engine_order_id,

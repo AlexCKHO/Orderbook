@@ -16,6 +16,7 @@
 *.userosscache
 *.sln.docstates
 *.suo
+TempEventResult.bin
 
 # Secret handling
 appsettings.Development.json

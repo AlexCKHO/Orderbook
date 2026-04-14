@@ -22,6 +22,7 @@ mod infrastructure;
 mod mappers;
 mod models;
 mod services;
+mod system;
 
 #[tokio::main]
 async fn main() {
@@ -96,8 +97,11 @@ async fn main() {
 
     let service = MatchingEngineService::new(dispatcher_tx);
     let engine_counter = Arc::clone(&tps_counter);
-    let engine_handle = tokio::spawn(async move {
-        service.run_matching_actor(inbound_rx, engine_counter).await;
+
+    // 注意：呢度係 std::thread，唔係 tokio::spawn
+    let engine_thread = std::thread::spawn(move || {
+        // 傳入 inbound_rx 即可，唔使 clone，因為 main 之後都唔會再用 rx
+        service.run_matching_actor(inbound_rx, engine_counter);
     });
 
     // 2. Use futures::future::OptionFuture and handle the Vec of consumers
@@ -139,9 +143,6 @@ async fn main() {
         },
         _ = dispatcher_future => {
             eprintln!("Dispatcher exited.");
-        },
-        res = engine_handle => {
-            eprintln!("Engine exited: {:?}", res);
         },
     }
 }

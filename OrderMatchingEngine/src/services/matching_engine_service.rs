@@ -1,18 +1,16 @@
 use crate::models::engine_payload::EnginePayload;
 use crate::models::order_book::OrderBook;
-use std::fs;
 use std::fs::File;
-use std::io::{Read, Write};
-use std::os::unix::raw::time_t;
+use std::io::Write;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::SystemTime;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
 // Internal Models
 use crate::models::events::MatchEvent;
 use crate::models::order::EngineAction;
 use crate::orderbook_grpc::OrderAck;
+use crate::system::thread::set_core;
 
 pub struct MatchingEngineService {
     dispatcher_tx: mpsc::Sender<Vec<(MatchEvent, u64)>>,
@@ -24,18 +22,24 @@ impl MatchingEngineService {
         Self { dispatcher_tx }
     }
 
-    pub async fn run_matching_actor(
+    pub fn run_matching_actor(
         self,
         mut inbound_rx: mpsc::Receiver<EnginePayload>,
         counter: Arc<AtomicU64>,
     ) {
+        if set_core(0) {
+            println!("✅ Matcher Actor pinned to Core 0");
+        } else {
+            eprintln!("❌ Failed to pin Matcher Actor");
+        }
+
         let mut oms_engine_order_id_counter: u64 = 0;
         let mut last_event_sequence: u64 = 0;
         let mut order_book = OrderBook::new(0);
 
         let mut reusable_events_buffer: Vec<MatchEvent> = Vec::with_capacity(8092);
 
-        while let Some(payload) = inbound_rx.recv().await {
+        while let Some(payload) = inbound_rx.blocking_recv() {
             let batch_size = payload.actions.len() as u64;
             let mut acks: Vec<OrderAck> = Vec::with_capacity(payload.actions.len());
 
@@ -87,7 +91,9 @@ impl MatchingEngineService {
             // Section 2.
             // Send result to dispatcher
             if !reusable_events_buffer.is_empty() {
-                let event_batch = std::mem::take(&mut reusable_events_buffer);
+                let event_batch =
+                    std::mem::replace(&mut reusable_events_buffer, Vec::with_capacity(8092));
+
                 let sequenced_batch: Vec<(MatchEvent, u64)> = event_batch
                     .into_iter()
                     .map(|evt| {
@@ -108,8 +114,6 @@ impl MatchingEngineService {
                         break;
                     }
                 }
-
-                reusable_events_buffer.clear();
             }
 
             counter.fetch_add(batch_size, Ordering::Relaxed);
@@ -120,7 +124,6 @@ impl MatchingEngineService {
 pub async fn read_all_from_binary() -> bincode::Result<Vec<(MatchEvent, u64)>> {
     let mut file = File::open("TempEventResult.bin").map_err(bincode::Error::from)?;
     let mut all_events = Vec::new();
-
     while let Ok(batch) = bincode::deserialize_from::<&File, Vec<(MatchEvent, u64)>>(&file) {
         all_events.extend(batch);
     }
