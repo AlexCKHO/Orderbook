@@ -98,9 +98,9 @@ async fn main() {
     let service = MatchingEngineService::new(dispatcher_tx);
     let engine_counter = Arc::clone(&tps_counter);
 
-    // 注意：呢度係 std::thread，唔係 tokio::spawn
+
     let engine_thread = std::thread::spawn(move || {
-        // 傳入 inbound_rx 即可，唔使 clone，因為 main 之後都唔會再用 rx
+
         service.run_matching_actor(inbound_rx, engine_counter);
     });
 
