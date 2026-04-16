@@ -53,18 +53,20 @@ message OrderPlaced {
 }
 
 message TradeExecuted {
-  fixed64 maker_engine_order_id = 1;
-  fixed64 taker_engine_order_id = 2;
-  fixed64 price = 3;
-  fixed64 qty = 4;
-  int64 timestamp = 5;
-  Side taker_side = 6;
-  fixed64 trade_id = 7;
+  fixed64 maker_client_order_id = 1;
+  fixed64 taker_client_order_id = 2;
+  fixed64 maker_engine_order_id = 3;
+  fixed64 taker_engine_order_id = 4;
+  fixed64 price = 5;
+  fixed64 qty = 6;
+  Side taker_side = 7;
+  fixed64 trade_id = 8;
 }
 
 message OrderCancelled {
-  fixed64 engine_order_id = 1;
-  fixed64 cancelled_qty = 2;
+  fixed64 client_order_id = 1;
+  fixed64 engine_order_id = 2;
+  fixed64 cancelled_qty = 3;
 }
 
 message OrderKilled {
@@ -73,18 +75,19 @@ message OrderKilled {
 }
 
 message CancelRejected {
-  fixed64 engine_order_id = 1;
+  fixed64 client_order_id = 1;
   CancelRejectReason reason = 2;
 }
 
 message MatchEvent {
   uint64 sequence = 1;
+  int64 timestamp = 2;
   oneof event_data {
-    OrderPlaced placed = 2;
-    TradeExecuted filled = 3;
-    OrderCancelled cancelled = 4;
-    OrderKilled killed = 5;
-    CancelRejected rejected = 6;
+    OrderPlaced placed = 3;
+    TradeExecuted filled = 4;
+    OrderCancelled cancelled = 5;
+    OrderKilled killed = 6;
+    CancelRejected rejected = 7;
   }
 }
 
@@ -96,7 +99,8 @@ message OrderAck {
 message OrderBatchResponse {
   bool success = 1;
   string message = 2;
-  repeated OrderAck acks = 3;
+  int64 timestamp = 3;
+  repeated OrderAck acks = 4;
 }
 
 message SubscribeRequest {}
