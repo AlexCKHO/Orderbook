@@ -1,27 +1,27 @@
+use crate::models::events::MatchEvent;
 use std::fs::File;
 use std::io::Write;
-use crate::models::events::MatchEvent;
 use tokio::sync::mpsc;
+use tokio::sync::mpsc::Sender;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::time::{Duration, sleep};
 pub struct DispatcherService {
-    kafka_tx: mpsc::Sender<Vec<(MatchEvent, u64)>>,
+    kafka_tx: mpsc::Sender<Vec<(MatchEvent, u64, u64)>>,
 }
 
 impl DispatcherService {
-    pub fn new(kafka_tx: mpsc::Sender<Vec<(MatchEvent, u64)>>) -> Self {
+    pub fn new(kafka_tx: Sender<Vec<(MatchEvent, u64, u64)>>) -> Self {
         Self { kafka_tx }
     }
 
-    pub async fn run(self, mut dispatcher_rx: mpsc::Receiver<Vec<(MatchEvent, u64)>>) {
+    pub async fn run(self, mut dispatcher_rx: mpsc::Receiver<Vec<(MatchEvent, u64, u64)>>) {
         let mut batches_forwarded: u64 = 0;
         let mut batches_blocked: u64 = 0;
 
-        let mut smart_buffer: Vec<(MatchEvent, u64)> = Vec::with_capacity(5000);
+        let mut smart_buffer: Vec<(MatchEvent, u64, u64)> = Vec::with_capacity(5000);
         let linger_time = Duration::from_millis(10);
 
         loop {
-
             tokio::select! {
                 // Scenario A: receiving incoming batch
                 Some(mut incoming_batch) = dispatcher_rx.recv() => {
@@ -62,7 +62,7 @@ impl DispatcherService {
 
     async fn flush_to_kafka(
         &self,
-        buffer: &mut Vec<(MatchEvent, u64)>,
+        buffer: &mut Vec<(MatchEvent, u64, u64)>,
         forwarded: &mut u64,
         blocked: &mut u64,
     ) {
@@ -75,7 +75,10 @@ impl DispatcherService {
             }
             Err(TrySendError::Full(failed_payload)) => {
                 *blocked += 1;
-                eprintln!("[dispatcher] Kafka queue full! Spilling {} events to disk.", failed_payload.len());
+                eprintln!(
+                    "[dispatcher] Kafka queue full! Spilling {} events to disk.",
+                    failed_payload.len()
+                );
 
                 // ⚡ Non-blocking Spill。
                 tokio::spawn(async move {
@@ -90,17 +93,18 @@ impl DispatcherService {
         }
     }
 
-    pub async fn read_all_from_binary() -> bincode::Result<Vec<(MatchEvent, u64)>> {
+    pub async fn read_all_from_binary() -> bincode::Result<Vec<(MatchEvent, u64, u64)>> {
         let mut file = File::open("TempEventResult.bin").map_err(bincode::Error::from)?;
         let mut all_events = Vec::new();
 
-        while let Ok(batch) = bincode::deserialize_from::<&File, Vec<(MatchEvent, u64)>>(&file) {
+        while let Ok(batch) = bincode::deserialize_from::<&File, Vec<(MatchEvent, u64, u64)>>(&file)
+        {
             all_events.extend(batch);
         }
         Ok(all_events)
     }
 
-    pub fn emergency_log_to_disk(match_event: Vec<(MatchEvent, u64)>) -> bincode::Result<()> {
+    pub fn emergency_log_to_disk(match_event: Vec<(MatchEvent, u64, u64)>) -> bincode::Result<()> {
         use std::fs::OpenOptions;
 
         let mut file = OpenOptions::new()

@@ -33,8 +33,8 @@ async fn main() {
 
     // main.rs
     let (inbound_tx, inbound_rx) = mpsc::channel::<EnginePayload>(128);
-    let (dispatcher_tx, mut dispatcher_rx) = mpsc::channel::<Vec<(MatchEvent, u64)>>(100_000);
-    let (kafka_tx, kafka_rx) = mpsc::channel::<Vec<(MatchEvent, u64)>>(100_000);
+    let (dispatcher_tx, mut dispatcher_rx) = mpsc::channel::<Vec<(MatchEvent, u64, u64)>>(100_000);
+    let (kafka_tx, kafka_rx) = mpsc::channel::<Vec<(MatchEvent, u64, u64)>>(100_000);
 
     // 1. Initialize handles as Options or empty vectors outside the if blocks
     let mut consumer_tasks = Vec::new();
@@ -98,9 +98,7 @@ async fn main() {
     let service = MatchingEngineService::new(dispatcher_tx);
     let engine_counter = Arc::clone(&tps_counter);
 
-
     let engine_thread = std::thread::spawn(move || {
-
         service.run_matching_actor(inbound_rx, engine_counter);
     });
 

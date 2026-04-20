@@ -7,8 +7,8 @@ use orderbook_grpc::Side as ProtoSide;
 
 pub struct MapperError(pub String);
 
-impl From<(MatchEvent, u64, i64)> for protoMatchEvent {
-    fn from(data: (MatchEvent, u64, i64)) -> Self {
+impl From<(MatchEvent, u64, u64)> for protoMatchEvent {
+    fn from(data: (MatchEvent, u64, u64)) -> Self {
         let (event, seq, timestamp) = data;
 
         let event_data = match event {
@@ -36,9 +36,9 @@ impl From<(MatchEvent, u64, i64)> for protoMatchEvent {
                 taker_engine_order_id,
                 price,
                 qty,
-                timestamp,
                 taker_side,
                 trade_id,
+                ..
             } => EventData::Filled(orderbook_grpc::TradeExecuted {
                 maker_client_order_id,
                 taker_client_order_id,

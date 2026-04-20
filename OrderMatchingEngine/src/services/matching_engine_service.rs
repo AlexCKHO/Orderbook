@@ -13,12 +13,12 @@ use crate::orderbook_grpc::OrderAck;
 use crate::system::thread::set_core;
 
 pub struct MatchingEngineService {
-    dispatcher_tx: mpsc::Sender<Vec<(MatchEvent, u64)>>,
+    dispatcher_tx: mpsc::Sender<Vec<(MatchEvent, u64, u64)>>,
 }
 const OMS_MASK: u64 = 1 << 63;
 
 impl MatchingEngineService {
-    pub fn new(dispatcher_tx: mpsc::Sender<Vec<(MatchEvent, u64)>>) -> Self {
+    pub fn new(dispatcher_tx: mpsc::Sender<Vec<(MatchEvent, u64, u64)>>) -> Self {
         Self { dispatcher_tx }
     }
 
@@ -94,11 +94,11 @@ impl MatchingEngineService {
                 let event_batch =
                     std::mem::replace(&mut reusable_events_buffer, Vec::with_capacity(8092));
 
-                let sequenced_batch: Vec<(MatchEvent, u64)> = event_batch
+                let sequenced_batch: Vec<(MatchEvent, u64, u64)> = event_batch
                     .into_iter()
                     .map(|evt| {
                         last_event_sequence += 1;
-                        (evt, last_event_sequence)
+                        (evt, last_event_sequence, timestamp)
                     })
                     .collect();
 
@@ -122,14 +122,14 @@ impl MatchingEngineService {
 }
 
 pub async fn read_all_from_binary() -> bincode::Result<Vec<(MatchEvent, u64)>> {
-    let mut file = File::open("TempEventResult.bin").map_err(bincode::Error::from)?;
+    let file = File::open("TempEventResult.bin").map_err(bincode::Error::from)?;
     let mut all_events = Vec::new();
     while let Ok(batch) = bincode::deserialize_from::<&File, Vec<(MatchEvent, u64)>>(&file) {
         all_events.extend(batch);
     }
     Ok(all_events)
 }
-fn emergency_log_to_disk(match_event: Vec<(MatchEvent, u64)>) -> bincode::Result<()> {
+fn emergency_log_to_disk(match_event: Vec<(MatchEvent, u64, u64)>) -> bincode::Result<()> {
     use std::fs::OpenOptions;
 
     let mut file = OpenOptions::new()

@@ -134,7 +134,7 @@ impl RedpandaProducer {
         }
     }
 
-    pub async fn start_event_producer(self, outbound_rx: mpsc::Receiver<Vec<(MatchEvent, u64)>>) {
+    pub async fn start_event_producer(self, outbound_rx: mpsc::Receiver<Vec<(MatchEvent, u64, u64)>>) {
         println!("Here:::::! start_event_producer");
         let producer: FutureProducer = ClientConfig::new()
             .set("bootstrap.servers", &self.brokers)
@@ -146,8 +146,8 @@ impl RedpandaProducer {
         let mut rx = outbound_rx;
 
         while let Some(event_batch) = rx.recv().await {
-            for (internal_event, seq) in event_batch {
-                let bytes = ProtoMatchEvent::from((internal_event, seq)).encode_to_vec();
+            for (internal_event, seq, timestamp) in event_batch {
+                let bytes = ProtoMatchEvent::from((internal_event, seq, timestamp)).encode_to_vec();
 
                 let record = FutureRecord::to(&topic_name).payload(&bytes).key("BTC-USD");
 
