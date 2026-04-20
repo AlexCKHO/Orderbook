@@ -41,6 +41,7 @@ impl MatchingEngineService {
 
         while let Some(payload) = inbound_rx.blocking_recv() {
             let batch_size = payload.actions.len() as u64;
+            let batch_timestamp = payload.ingress_timestamp as u64;
             let mut acks: Vec<OrderAck> = Vec::with_capacity(payload.actions.len());
 
             for mut action in payload.actions {
@@ -98,7 +99,7 @@ impl MatchingEngineService {
                     .into_iter()
                     .map(|evt| {
                         last_event_sequence += 1;
-                        (evt, last_event_sequence, timestamp)
+                        (evt, last_event_sequence, batch_timestamp)
                     })
                     .collect();
 

@@ -35,7 +35,7 @@ impl GrpcGateway {
             base_quanta,
         }
     }
-    
+
     fn get_unix_nanos(&self) -> i64 {
         let now_quanta = self.clock.now();
         let delta = now_quanta
@@ -96,6 +96,7 @@ impl MatchingEngine for GrpcGateway {
                                 .send(EnginePayload {
                                     actions: batch,
                                     reply_tx: Some(ack_tx),
+                                    ingress_timestamp: timestamp
                                 })
                                 .await
                                 .is_err()

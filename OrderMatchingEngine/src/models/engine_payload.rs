@@ -6,4 +6,5 @@ use tokio::sync::oneshot;
 pub struct EnginePayload {
     pub actions: Vec<EngineAction>,
     pub reply_tx: Option<oneshot::Sender<Vec<OrderAck>>>,
+    pub ingress_timestamp: i64,
 }
