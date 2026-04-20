@@ -71,13 +71,14 @@ impl MatchingEngine for GrpcGateway {
                             }
 
                             let resp_tx_clone = resp_tx.clone();
-
+                            //Acknowledge order request gets in orderbook
                             tokio::spawn(async move {
                                 match ack_rx.await {
                                     Ok(acks) => {
                                         let reply = OrderBatchResponse {
                                             success: true,
                                             message: "Orders queued".into(),
+                                            timestamp: 1,
                                             acks,
                                         };
                                         let _ = resp_tx_clone.send(Ok(reply)).await;

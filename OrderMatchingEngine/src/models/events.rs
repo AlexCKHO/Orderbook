@@ -16,6 +16,8 @@ pub enum MatchEvent {
         side: Side,
     },
     TradeExecuted {
+        maker_client_order_id: u64,
+        taker_client_order_id: u64,
         maker_engine_order_id: u64,
         taker_engine_order_id: u64,
         price: u64,
@@ -25,11 +27,12 @@ pub enum MatchEvent {
         trade_id: u64,
     },
     OrderCancelled {
+        client_order_id: u64,
         engine_order_id: u64,
         cancelled_qty: u64,
     },
     CancelRejected {
-        engine_order_id: u64,
+        client_order_id: u64,
         reason: CancelRejectReason,
     },
     OrderKilled {

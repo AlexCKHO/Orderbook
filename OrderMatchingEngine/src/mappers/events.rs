@@ -7,9 +7,9 @@ use orderbook_grpc::Side as ProtoSide;
 
 pub struct MapperError(pub String);
 
-impl From<(MatchEvent, u64)> for protoMatchEvent {
-    fn from(data: (MatchEvent, u64)) -> Self {
-        let (event, seq) = data;
+impl From<(MatchEvent, u64, i64)> for protoMatchEvent {
+    fn from(data: (MatchEvent, u64, i64)) -> Self {
+        let (event, seq, timestamp) = data;
 
         let event_data = match event {
             MatchEvent::OrderPlaced {
@@ -30,6 +30,8 @@ impl From<(MatchEvent, u64)> for protoMatchEvent {
                 },
             }),
             MatchEvent::TradeExecuted {
+                maker_client_order_id,
+                taker_client_order_id,
                 maker_engine_order_id,
                 taker_engine_order_id,
                 price,
@@ -38,11 +40,12 @@ impl From<(MatchEvent, u64)> for protoMatchEvent {
                 taker_side,
                 trade_id,
             } => EventData::Filled(orderbook_grpc::TradeExecuted {
+                maker_client_order_id,
+                taker_client_order_id,
                 maker_engine_order_id,
                 taker_engine_order_id,
                 price,
                 qty,
-                timestamp,
                 taker_side: match taker_side {
                     Side::Bid => ProtoSide::Bid as i32,
                     Side::Ask => ProtoSide::Ask as i32,
@@ -50,10 +53,12 @@ impl From<(MatchEvent, u64)> for protoMatchEvent {
                 trade_id,
             }),
             MatchEvent::OrderCancelled {
+                client_order_id,
                 engine_order_id,
                 cancelled_qty,
                 ..
             } => EventData::Cancelled(orderbook_grpc::OrderCancelled {
+                client_order_id,
                 engine_order_id,
                 cancelled_qty,
             }),
@@ -65,10 +70,10 @@ impl From<(MatchEvent, u64)> for protoMatchEvent {
                 killed_qty,
             }),
             MatchEvent::CancelRejected {
-                engine_order_id,
+                client_order_id,
                 reason,
             } => EventData::Rejected(orderbook_grpc::CancelRejected {
-                engine_order_id,
+                client_order_id,
                 reason: match reason {
                     CancelRejectReason::OrderNotFound => 1,
                     _ => 0,
@@ -78,6 +83,7 @@ impl From<(MatchEvent, u64)> for protoMatchEvent {
 
         protoMatchEvent {
             sequence: seq,
+            timestamp,
             event_data: Some(event_data),
         }
     }
