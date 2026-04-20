@@ -50,7 +50,7 @@ impl OrderBook {
         let Some(&(client_order_id, price, side)) = self.order_locations.get(&engine_order_id)
         else {
             events.push(MatchEvent::CancelRejected {
-                engine_order_id,
+                client_order_id: req_client_order_id,
                 reason: CancelRejectReason::OrderNotFound,
             });
             return;
@@ -58,7 +58,7 @@ impl OrderBook {
 
         if req_client_order_id != client_order_id {
             events.push(MatchEvent::CancelRejected {
-                engine_order_id,
+                client_order_id,
                 reason: CancelRejectReason::OrderNotFound,
             });
             return;
@@ -87,6 +87,7 @@ impl OrderBook {
         }
 
         events.push(MatchEvent::OrderCancelled {
+            client_order_id,
             engine_order_id: cancelled_order.engine_order_id,
             cancelled_qty: cancelled_order.qty,
         });
@@ -137,6 +138,8 @@ impl OrderBook {
                 self.trade_id += 1;
 
                 events.push(MatchEvent::TradeExecuted {
+                    maker_client_order_id: best_ask_order.client_order_id,
+                    taker_client_order_id: new_bid_order.client_order_id,
                     maker_engine_order_id: best_ask_order.engine_order_id,
                     taker_engine_order_id: new_bid_order.engine_order_id,
                     price: ask_price,
@@ -192,6 +195,8 @@ impl OrderBook {
                 self.trade_id += 1;
                 // println!("💵 Current price: {}", bid_price);
                 events.push(MatchEvent::TradeExecuted {
+                    maker_client_order_id: best_bid_order.client_order_id,
+                    taker_client_order_id: new_ask_order.client_order_id,
                     maker_engine_order_id: best_bid_order.engine_order_id,
                     taker_engine_order_id: new_ask_order.engine_order_id,
                     price: bid_price,
