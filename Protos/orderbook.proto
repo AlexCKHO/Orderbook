@@ -44,6 +44,13 @@ message EngineBatchCommand {
   repeated EngineCommand commands = 1;
 }
 
+message PublicTrade {
+  fixed64 price = 1;
+  fixed64 qty = 2;
+  Side taker_side = 3;
+  fixed64 trade_id = 4;
+}
+
 message OrderPlaced {
   fixed64 client_order_id = 1;
   fixed64 engine_order_id = 2;
