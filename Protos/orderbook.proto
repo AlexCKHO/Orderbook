@@ -95,6 +95,7 @@ message MatchEvent {
     OrderCancelled cancelled = 5;
     OrderKilled killed = 6;
     CancelRejected rejected = 7;
+    PublicTrade traded = 8;
   }
 }
 
