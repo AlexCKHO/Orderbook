@@ -39,4 +39,10 @@ pub enum MatchEvent {
         client_order_id: u64,
         killed_qty: u64,
     },
+    PublicTrade {
+        price: u64,
+        qty: u64,
+        taker_side: Side,
+        trade_id: u64,
+    },
 }

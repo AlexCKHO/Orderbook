@@ -148,6 +148,12 @@ impl OrderBook {
                     taker_side: new_bid_order.side,
                     trade_id: current_trade_id,
                 });
+                events.push(MatchEvent::PublicTrade {
+                    price: ask_price,
+                    qty: match_qty,
+                    taker_side: new_bid_order.side,
+                    trade_id: current_trade_id,
+                });
 
                 if best_ask_order.qty == 0 {
                     let removed_order = ask_queue.pop_front().unwrap();
@@ -202,6 +208,13 @@ impl OrderBook {
                     price: bid_price,
                     qty: match_qty,
                     timestamp: new_ask_order.timestamp,
+                    taker_side: new_ask_order.side,
+                    trade_id: current_trade_id,
+                });
+
+                events.push(MatchEvent::PublicTrade {
+                    price: bid_price,
+                    qty: match_qty,
                     taker_side: new_ask_order.side,
                     trade_id: current_trade_id,
                 });
@@ -298,7 +311,7 @@ mod tests {
 
     /// Helper function to construct Orders
     fn new_order(
-        id: u64, // 喺 Test 入面，我哋用同一個 ID 嚟代表 Engine ID 同 Client ID
+        id: u64,
         price: u64,
         qty: u64,
         side: Side,

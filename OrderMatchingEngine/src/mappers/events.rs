@@ -79,6 +79,21 @@ impl From<(MatchEvent, u64, u64)> for protoMatchEvent {
                     _ => 0,
                 },
             }),
+
+            MatchEvent::PublicTrade {
+                price,
+                qty,
+                taker_side,
+                trade_id,
+            } => EventData::Traded(orderbook_grpc::PublicTrade {
+                price,
+                qty,
+                taker_side: match taker_side {
+                    Side::Bid => ProtoSide::Bid as i32,
+                    Side::Ask => ProtoSide::Ask as i32,
+                },
+                trade_id,
+            }),
         };
 
         protoMatchEvent {
