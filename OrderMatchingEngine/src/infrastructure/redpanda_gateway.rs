@@ -1,6 +1,7 @@
 use crate::models::engine_payload::EnginePayload;
 use crate::models::events::MatchEvent;
 use crate::models::order::EngineAction;
+use crate::orderbook_grpc;
 use crate::orderbook_grpc::{EngineBatchCommand, MatchEvent as ProtoMatchEvent};
 use prost::Message as ProstMessage;
 use rdkafka::Message;
@@ -74,7 +75,7 @@ impl RedpandaConsumer {
             match consumer.recv().await {
                 Err(e) => eprint!("Kafka error: {}", e),
                 Ok(msg) => {
-                    // Unwrap the incoming Kafka message as array of u8
+                    // Unwrap the incoming Kafka a message as array of u8
                     if let Some(bytes) = msg.payload() {
                         match EngineBatchCommand::decode(bytes) {
                             Ok(engine_batch_command) => {
@@ -122,19 +123,24 @@ impl RedpandaConsumer {
 pub struct RedpandaProducer {
     brokers: String,
     group_id: String,
-    topic: String,
+    public_topic: String,
+    private_topic: String,
 }
 
 impl RedpandaProducer {
-    pub fn new(brokers: &str, group_id: &str, topic: &str) -> Self {
+    pub fn new(brokers: &str, group_id: &str, public_topic: &str, private_topic: &str) -> Self {
         Self {
             brokers: brokers.to_string(),
             group_id: group_id.to_string(),
-            topic: topic.to_string(),
+            public_topic: public_topic.to_string(),
+            private_topic: private_topic.to_string(),
         }
     }
 
-    pub async fn start_event_producer(self, outbound_rx: mpsc::Receiver<Vec<(MatchEvent, u64, u64)>>) {
+    pub async fn start_event_producer(
+        self,
+        outbound_rx: mpsc::Receiver<Vec<(MatchEvent, u64, u64)>>,
+    ) {
         println!("Here:::::! start_event_producer");
         let producer: FutureProducer = ClientConfig::new()
             .set("bootstrap.servers", &self.brokers)
@@ -142,14 +148,20 @@ impl RedpandaProducer {
             .create()
             .expect("Producer creation error");
 
-        let topic_name = self.topic.clone();
         let mut rx = outbound_rx;
 
         while let Some(event_batch) = rx.recv().await {
             for (internal_event, seq, timestamp) in event_batch {
+                let proto_event = ProtoMatchEvent::from((internal_event, seq, timestamp));
+
+                let target_topic = match &proto_event.event_data {
+                    Some(orderbook_grpc::match_event::EventData::Traded(_)) => &self.public_topic,
+                    _ => &self.private_topic,
+                };
+
                 let bytes = ProtoMatchEvent::from((internal_event, seq, timestamp)).encode_to_vec();
 
-                let record = FutureRecord::to(&topic_name).payload(&bytes).key("BTC-USD");
+                let record = FutureRecord::to(&target_topic).payload(&bytes).key("BTC-USD");
 
                 if let Err((e, _)) = producer.send(record, Duration::from_secs(1)).await {
                     eprintln!("Failed to produce event to Redpanda: {:?}", e);
