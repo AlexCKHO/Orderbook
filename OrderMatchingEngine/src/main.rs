@@ -65,7 +65,7 @@ async fn main() {
 
     // Setting up kafka producer
     if use_redpanda_producer {
-        let producer = RedpandaProducer::new(&cfg.brokers, &cfg.group_id, &cfg.events_topic);
+        let producer = RedpandaProducer::new(&cfg.brokers, &cfg.group_id, &cfg.public_events_topic, &cfg.ind_events_topic);
         producer_handle = Some(tokio::spawn(async move {
             producer.start_event_producer(kafka_rx).await;
         }));

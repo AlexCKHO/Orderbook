@@ -124,16 +124,16 @@ pub struct RedpandaProducer {
     brokers: String,
     group_id: String,
     public_topic: String,
-    private_topic: String,
+    ind_topic: String,
 }
 
 impl RedpandaProducer {
-    pub fn new(brokers: &str, group_id: &str, public_topic: &str, private_topic: &str) -> Self {
+    pub fn new(brokers: &str, group_id: &str, public_topic: &str, ind_topic: &str) -> Self {
         Self {
             brokers: brokers.to_string(),
             group_id: group_id.to_string(),
             public_topic: public_topic.to_string(),
-            private_topic: private_topic.to_string(),
+            ind_topic: ind_topic.to_string(),
         }
     }
 
@@ -156,7 +156,7 @@ impl RedpandaProducer {
 
                 let target_topic = match &proto_event.event_data {
                     Some(orderbook_grpc::match_event::EventData::Traded(_)) => &self.public_topic,
-                    _ => &self.private_topic,
+                    _ => &self.ind_topic,
                 };
 
                 let bytes = ProtoMatchEvent::from((internal_event, seq, timestamp)).encode_to_vec();
