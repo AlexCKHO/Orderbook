@@ -7,10 +7,11 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="8.0.17"/>
+        <PackageReference Include="Confluent.Kafka" Version="2.14.0" />
+        <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="8.0.17" />
         <PackageReference Include="Microsoft.AspNetCore.SignalR.Common" Version="8.0.26" />
         <PackageReference Include="Microsoft.AspNetCore.SignalR.Protocols.Json" Version="8.0.26" />
-        <PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2"/>
+        <PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
     </ItemGroup>
 
 </Project>
