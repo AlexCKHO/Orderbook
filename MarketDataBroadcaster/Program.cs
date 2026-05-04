@@ -1,4 +1,5 @@
 using MarketDataBroadcaster.Hubs;
+using MarketDataBroadcaster.Services;
 
 namespace MarketDataBroadcaster;
 
@@ -7,10 +8,17 @@ public class Program
     public static void Main(string[] args)
     {
         var builder = WebApplication.CreateBuilder(args);
+        
+        builder.Services.AddSignalR(options =>
+        {
 
-        builder.Services.AddSignalR();
+            options.ClientTimeoutInterval = TimeSpan.FromSeconds(60);
+            options.KeepAliveInterval = TimeSpan.FromSeconds(15);
+            options.HandshakeTimeout = TimeSpan.FromSeconds(15);
+        });
+        builder.Services.AddHostedService<KafkaMarketDataConsumer>();
         var app = builder.Build();
-        app.MapHub<MarketHub>("/marketdata");
+        app.MapHub<MarketHub>("/market-data");
         app.Run();
     }
 }
