@@ -49,19 +49,23 @@ public class KafkaMarketDataConsumer : BackgroundService
             {
                 var result = consumer.Consume(stoppingToken);
                 byte[] rawData = result.Message.Value;
-
-                try
+                
+                var matchEvent = MatchEvent.Parser.ParseFrom(rawData);
+                
+                switch (matchEvent.EventDataCase)
                 {
-                    var tradeData = PublicTrade.Parser.ParseFrom(rawData);
+                    case MatchEvent.EventDataOneofCase.Filled:
+                        var filled = matchEvent.Filled;
+                        _logger.LogInformation($" Price: {filled.Price}, Qty: {filled.Qty}");
+                        await _hubContext.Clients.All.SendAsync("ReceiveMarketData", filled);
+                        break;
 
-                    _logger.LogInformation(
-                        $"[Trade] ID:{tradeData.TradeId}, Price:{tradeData.Price}, Qty:{tradeData.Qty}, Side:{tradeData.TakerSide}");
+                    case MatchEvent.EventDataOneofCase.Traded:
+                        var traded = matchEvent.Traded;
+                        await _hubContext.Clients.All.SendAsync("ReceiveMarketData", traded);
+                        break;
 
-                    await _hubContext.Clients.All.SendAsync("ReceiveMarketData", tradeData, stoppingToken);
-                }
-                catch (InvalidProtocolBufferException ex)
-                {
-                    _logger.LogError($"無法解碼 Protobuf 數據: {ex.Message}");
+
                 }
             }
         }
