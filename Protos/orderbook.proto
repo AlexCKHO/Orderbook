@@ -1,0 +1,119 @@
+syntax = "proto3";
+package orderbook;
+
+enum Side {
+  SIDE_UNSPECIFIED = 0;
+  BID = 1;
+  ASK = 2;
+}
+
+enum OrderType {
+  ORDERTYPE_UNSPECIFIED = 0;
+  LIMIT = 1;
+  MARKET = 2;
+}
+
+enum CancelRejectReason {
+  REASON_UNSPECIFIED = 0;
+  ORDER_NOT_FOUND = 1;
+}
+
+message OrderRequest {
+  fixed64 client_order_id = 1;
+  fixed64 price = 2;
+  fixed64 qty = 3;
+  Side side = 4;
+  OrderType order_type = 5;
+  int64 timestamp = 6;
+}
+
+message CancelRequest {
+  fixed64 client_order_id = 1;
+  fixed64 engine_order_id = 2;
+  int64 timestamp = 3;
+}
+
+message EngineCommand {
+  oneof command {
+    OrderRequest place_order = 1;
+    CancelRequest cancel_order = 2;
+  }
+}
+
+message EngineBatchCommand {
+  repeated EngineCommand commands = 1;
+}
+
+message PublicTrade {
+  fixed64 price = 1;
+  fixed64 qty = 2;
+  Side taker_side = 3;
+  fixed64 trade_id = 4;
+}
+
+message OrderPlaced {
+  fixed64 client_order_id = 1;
+  fixed64 engine_order_id = 2;
+  fixed64 price = 3;
+  fixed64 qty = 4;
+  Side side = 5;
+}
+
+message TradeExecuted {
+  fixed64 maker_client_order_id = 1;
+  fixed64 taker_client_order_id = 2;
+  fixed64 maker_engine_order_id = 3;
+  fixed64 taker_engine_order_id = 4;
+  fixed64 price = 5;
+  fixed64 qty = 6;
+  Side taker_side = 7;
+  fixed64 trade_id = 8;
+}
+
+message OrderCancelled {
+  fixed64 client_order_id = 1;
+  fixed64 engine_order_id = 2;
+  fixed64 cancelled_qty = 3;
+}
+
+message OrderKilled {
+  fixed64 client_order_id = 1;
+  fixed64 killed_qty = 2;
+}
+
+message CancelRejected {
+  fixed64 client_order_id = 1;
+  CancelRejectReason reason = 2;
+}
+
+message MatchEvent {
+  uint64 sequence = 1;
+  fixed64 timestamp = 2;
+  oneof event_data {
+    OrderPlaced placed = 3;
+    TradeExecuted filled = 4;
+    OrderCancelled cancelled = 5;
+    OrderKilled killed = 6;
+    CancelRejected rejected = 7;
+    PublicTrade traded = 8;
+  }
+}
+
+message OrderAck {
+  fixed64 client_order_id = 1;
+  fixed64 engine_order_id = 2;
+}
+
+message OrderBatchResponse {
+  bool success = 1;
+  string message = 2;
+  int64 timestamp = 3;
+  repeated OrderAck acks = 4;
+}
+
+message SubscribeRequest {}
+
+service MatchingEngine {
+  rpc PlaceBatchStream (stream EngineBatchCommand) returns (stream OrderBatchResponse);
+  rpc SubscribeEvents (SubscribeRequest) returns (stream MatchEvent);
+}
