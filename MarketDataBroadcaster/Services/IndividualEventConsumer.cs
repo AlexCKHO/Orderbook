@@ -1,19 +1,18 @@
 using Confluent.Kafka;
 using MarketDataBroadcaster.Hubs;
 using Microsoft.AspNetCore.SignalR;
-using Google.Protobuf;
 using Orderbook;
 
 namespace MarketDataBroadcaster.Services;
 
-public class KafkaMarketDataConsumer : BackgroundService
+public class IndividualEventConsumer : BackgroundService
 {
-    private readonly IConfiguration _config;
+     private readonly IConfiguration _config;
     private readonly IHubContext<MarketHub> _hubContext;
-    private readonly ILogger<KafkaMarketDataConsumer> _logger;
+    private readonly ILogger<IndividualEventConsumer> _logger;
 
-    public KafkaMarketDataConsumer(IConfiguration config, IHubContext<MarketHub> hubContext,
-        ILogger<KafkaMarketDataConsumer> logger)
+    public IndividualEventConsumer(IConfiguration config, IHubContext<MarketHub> hubContext,
+        ILogger<IndividualEventConsumer> logger)
     {
         _hubContext = hubContext;
         _config = config;
@@ -30,7 +29,7 @@ public class KafkaMarketDataConsumer : BackgroundService
         // Configuring kafka channel 
 
         var broker = _config["Kafka:Broker"];
-        var topic = _config["Kafka:Topic"];
+        var topic = _config["Kafka:IndTopic"];
         var groupId = _config["Kafka:GroupId"];
 
         var config = new ConsumerConfig()
