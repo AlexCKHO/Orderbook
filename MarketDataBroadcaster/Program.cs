@@ -16,7 +16,7 @@ public class Program
             options.KeepAliveInterval = TimeSpan.FromSeconds(15);
             options.HandshakeTimeout = TimeSpan.FromSeconds(15);
         });
-        builder.Services.AddHostedService<PublicEventConsumer>();
+       // builder.Services.AddHostedService<PublicEventConsumer>();
         builder.Services.AddHostedService<IndividualEventConsumer>();
         var app = builder.Build();
         app.MapHub<MarketHub>("/market-data");

@@ -48,23 +48,15 @@ public class PublicEventConsumer : BackgroundService
             {
                 var result = consumer.Consume(stoppingToken);
                 byte[] rawData = result.Message.Value;
-                
+
                 var matchEvent = MatchEvent.Parser.ParseFrom(rawData);
-                
+
                 switch (matchEvent.EventDataCase)
                 {
-                    case MatchEvent.EventDataOneofCase.Filled:
-                        var filled = matchEvent.Filled;
-                        _logger.LogInformation($" Price: {filled.Price}, Qty: {filled.Qty}");
-                        await _hubContext.Clients.All.SendAsync("ReceiveMarketData", filled);
-                        break;
-
                     case MatchEvent.EventDataOneofCase.Traded:
                         var traded = matchEvent.Traded;
                         await _hubContext.Clients.All.SendAsync("ReceiveMarketData", traded);
                         break;
-
-
                 }
             }
         }

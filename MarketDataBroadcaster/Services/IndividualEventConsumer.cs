@@ -53,16 +53,32 @@ public class IndividualEventConsumer : BackgroundService
                 
                 switch (matchEvent.EventDataCase)
                 {
-                    case MatchEvent.EventDataOneofCase.Filled:
-                        var filled = matchEvent.Filled;
-                        _logger.LogInformation($" Price: {filled.Price}, Qty: {filled.Qty}");
-                        await _hubContext.Clients.All.SendAsync("ReceiveMarketData", filled);
+                    case MatchEvent.EventDataOneofCase.Placed:
+                        var placed = matchEvent.Placed;
+                        await _hubContext.Clients.All.SendAsync("ReceivePlacedData", placed);
                         break;
 
-                    case MatchEvent.EventDataOneofCase.Traded:
-                        var traded = matchEvent.Traded;
-                        await _hubContext.Clients.All.SendAsync("ReceiveMarketData", traded);
+                    case MatchEvent.EventDataOneofCase.Filled:
+                        var filled = matchEvent.Filled;
+                        await _hubContext.Clients.All.SendAsync("ReceiveFilledData", filled);
                         break;
+
+                    case MatchEvent.EventDataOneofCase.Cancelled:
+                        var cancelled = matchEvent.Cancelled;
+                        await _hubContext.Clients.All.SendAsync("ReceiveCancelledData", cancelled);
+                        break;
+
+                    case MatchEvent.EventDataOneofCase.Killed:
+                        var killed = matchEvent.Killed;
+                        await _hubContext.Clients.All.SendAsync("ReceiveKilledData", killed);
+                        break;
+
+                    case MatchEvent.EventDataOneofCase.Rejected:
+                        var rejected = matchEvent.Rejected;
+                        await _hubContext.Clients.All.SendAsync("ReceiveRejectedData", rejected);
+                        break;
+
+                    
 
 
                 }
