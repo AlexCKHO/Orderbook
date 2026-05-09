@@ -4,10 +4,9 @@ namespace MarketDataBroadcaster.Hubs;
 
 public class MarketHub : Hub
 {
-    public async Task Subscribe(string symbol)
+    // User passes in their subscribe
+    public async Task Subscribe(string accountId)
     {
-        await Groups.AddToGroupAsync(Context.ConnectionId, symbol);
-
-        Console.WriteLine($"Client {Context.ConnectionId} subscribed to {symbol}");
+        await Groups.AddToGroupAsync(Context.ConnectionId, accountId);
     }
 }

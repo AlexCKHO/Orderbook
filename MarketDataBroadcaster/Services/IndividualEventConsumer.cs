@@ -1,3 +1,4 @@
+using System.Data;
 using Confluent.Kafka;
 using MarketDataBroadcaster.Hubs;
 using Microsoft.AspNetCore.SignalR;
@@ -7,7 +8,7 @@ namespace MarketDataBroadcaster.Services;
 
 public class IndividualEventConsumer : BackgroundService
 {
-     private readonly IConfiguration _config;
+    private readonly IConfiguration _config;
     private readonly IHubContext<MarketHub> _hubContext;
     private readonly ILogger<IndividualEventConsumer> _logger;
 
@@ -36,7 +37,7 @@ public class IndividualEventConsumer : BackgroundService
         {
             BootstrapServers = broker,
             GroupId = groupId,
-            AutoOffsetReset = AutoOffsetReset.Earliest
+            AutoOffsetReset = AutoOffsetReset.Latest
         };
 
         using var consumer = new ConsumerBuilder<Ignore, byte[]>(config).Build();
@@ -48,39 +49,47 @@ public class IndividualEventConsumer : BackgroundService
             {
                 var result = consumer.Consume(stoppingToken);
                 byte[] rawData = result.Message.Value;
-                
+
                 var matchEvent = MatchEvent.Parser.ParseFrom(rawData);
-                
+
                 switch (matchEvent.EventDataCase)
                 {
                     case MatchEvent.EventDataOneofCase.Placed:
                         var placed = matchEvent.Placed;
-                        await _hubContext.Clients.All.SendAsync("ReceivePlacedData", placed);
+                        var accountId = _decompose(placed.ClientOrderId);
+                        await _hubContext.Clients.Group(accountId.ToString()).SendAsync("ReceivePlacedData", placed);
                         break;
 
                     case MatchEvent.EventDataOneofCase.Filled:
                         var filled = matchEvent.Filled;
-                        await _hubContext.Clients.All.SendAsync("ReceiveFilledData", filled);
+                        var filledClientAccountId = _decompose(filled.MakerClientOrderId);
+                        var filledEngineAccountId = _decompose(filled.MakerEngineOrderId);
+                        await _hubContext.Clients.Group(filledClientAccountId.ToString())
+                            .SendAsync("ReceiveFilledData", filled);
+                        await _hubContext.Clients.Group(filledEngineAccountId.ToString())
+                            .SendAsync("ReceiveFilledData", filled);
                         break;
 
                     case MatchEvent.EventDataOneofCase.Cancelled:
                         var cancelled = matchEvent.Cancelled;
-                        await _hubContext.Clients.All.SendAsync("ReceiveCancelledData", cancelled);
+                        var cancelledAccountId = _decompose(cancelled.ClientOrderId);
+                        await _hubContext.Clients.Group(cancelledAccountId.ToString())
+                            .SendAsync("ReceiveCancelledData", cancelled);
                         break;
 
                     case MatchEvent.EventDataOneofCase.Killed:
                         var killed = matchEvent.Killed;
-                        await _hubContext.Clients.All.SendAsync("ReceiveKilledData", killed);
+                        var killedAccountId = _decompose(killed.ClientOrderId);
+                        await _hubContext.Clients.Group(killedAccountId.ToString())
+                            .SendAsync("ReceiveKilledData", killed);
                         break;
 
                     case MatchEvent.EventDataOneofCase.Rejected:
                         var rejected = matchEvent.Rejected;
-                        await _hubContext.Clients.All.SendAsync("ReceiveRejectedData", rejected);
+                        var rejectedAccountId = _decompose(rejected.ClientOrderId);
+                        await _hubContext.Clients.Group(rejectedAccountId.ToString())
+                            .SendAsync("ReceiveRejectedData", rejected);
                         break;
-
-                    
-
-
                 }
             }
         }
@@ -88,5 +97,15 @@ public class IndividualEventConsumer : BackgroundService
         {
             consumer.Close();
         }
+    }
+
+    private static (uint accountId, uint sequence) _decompose(ulong orderId)
+    {
+
+        uint sequence = (uint)(orderId & 0xFFFFFFFF);
+
+        uint accountId = (uint)((orderId >> 32) & 0x7FFFFFFF);
+
+        return (accountId, sequence);
     }
 }

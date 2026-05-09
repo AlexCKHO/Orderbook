@@ -598,11 +598,15 @@ class Program
 
     private static EngineCommand GenerateRandomOrderRequest(int index)
     {
+        
+        var testingOrderId = ComposeOrderId(1_000_000 , (uint)index);
+        var testingAccountId = _decompose(testingOrderId);
         return new EngineCommand
         {
+            
             PlaceOrder = new OrderRequest
             {
-                ClientOrderId = (ulong)(1_000_000 + index),
+                ClientOrderId = ComposeOrderId(1_000_000 , (uint)index),
                 Price = (ulong)Random.Shared.Next(100, 201),
                 Qty = (ulong)Random.Shared.Next(1, 100),
                 Side = Random.Shared.Next(0, 2) == 0 ? Side.Bid : Side.Ask,
@@ -614,11 +618,14 @@ class Program
 
     private static EngineCommand GenerateRandomCancelRequest(int index)
     {
+        
+        var testingOrderId = ComposeOrderId(1_000_000 , (uint)index);
+        var testingAccountId = _decompose(testingOrderId);
         return new EngineCommand
         {
             CancelOrder = new CancelRequest
             {
-                EngineOrderId = (ulong)(1_000_000 + index),
+                EngineOrderId = ComposeOrderId(1_000_000 , (uint)index),
                 Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
             }
         };
@@ -637,4 +644,24 @@ class Program
 
         Console.Write($"\rProgress: [{bar}{spaces}] {(progress * 100):F1}% ({current:N0}/{total:N0})");
     }
+
+    private static ulong ComposeOrderId(uint accountId, uint sequence)
+    {
+        ulong omsMask = 1UL << 63;
+        ulong baseId = ((ulong)accountId << 32) | sequence;
+
+        return omsMask | baseId;
+    }
+    
+    
+    private static (uint accountId, uint sequence) _decompose(ulong orderId)
+    {
+
+        uint sequence = (uint)(orderId & 0xFFFFFFFF);
+
+        uint accountId = (uint)((orderId >> 32) & 0x7FFFFFFF);
+
+        return (accountId, sequence);
+    }
+    
 }

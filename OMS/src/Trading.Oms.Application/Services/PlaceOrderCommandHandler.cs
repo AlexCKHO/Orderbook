@@ -26,7 +26,7 @@ public class PlaceOrderCommandHandler(
 
     public async Task<CommandAckResult> HandleAsync(PlaceOrderCommand cmd, CancellationToken token)
     {
-        // not valid → return result
+        // Business logic of the cmd not valid → return result
         // replay → return result
         // success → return result
         // exception → throw
@@ -47,13 +47,15 @@ public class PlaceOrderCommandHandler(
 
 
         var record = await _idempotencyRepository.GetAsync(scope, cmd.AccountId, cmd.IdempotencyKey, token);
-
+        
+        // Already have an order record with that IdempotencyKey
         if (record is not null)
         {
             return _handleExistingIdempotency(record, currentCmdHash);
         }
 
         // 3. Reservation
+        // Combine the cmd's details with the IdempotencyKey to save it as IdempotencyReservation object
         var reserve = new IdempotencyReservation
         {
             Scope = scope,
@@ -134,9 +136,10 @@ public class PlaceOrderCommandHandler(
         }
     }
 
-    private static CommandAckResult _handleExistingIdempotency(IdempotencyRecord record, string currentHash)
+    private static CommandAckResult _handleExistingIdempotency(IdempotencyRecord record, string currentCmdHash)
     {
-        if (!currentHash.Equals(record.RequestHash))
+        //Same key but different command values 
+        if (!currentCmdHash.Equals(record.RequestHash))
         {
             // possible malicious attack
             throw new IdempotencyConflictException(
