@@ -23,7 +23,7 @@ impl OrderBook {
         OrderBook {
             bids: BTreeMap::new(),
             asks: BTreeMap::new(),
-            order_locations: HashMap::new(),
+            order_locations: HashMap::with_capacity(10_000_000),
             trade_id,
         }
     }

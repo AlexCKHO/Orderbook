@@ -36,8 +36,10 @@ impl MatchingEngineService {
         let mut oms_engine_order_id_counter: u64 = 0;
         let mut last_event_sequence: u64 = 0;
         let mut order_book = OrderBook::new(0);
+        let event_buffer_size: usize = 8092;
 
-        let mut reusable_events_buffer: Vec<MatchEvent> = Vec::with_capacity(8092);
+        let mut reusable_events_buffer: Vec<MatchEvent> = Vec::with_capacity(event_buffer_size);
+        let mut output_buffer: Vec<(MatchEvent, u64, u64)> = Vec::with_capacity(8092);
 
         while let Some(payload) = inbound_rx.blocking_recv() {
             let batch_size = payload.actions.len() as u64;
@@ -92,18 +94,14 @@ impl MatchingEngineService {
             // Section 2.
             // Send result to dispatcher
             if !reusable_events_buffer.is_empty() {
-                let event_batch =
-                    std::mem::replace(&mut reusable_events_buffer, Vec::with_capacity(8092));
+                output_buffer.clear();
 
-                let sequenced_batch: Vec<(MatchEvent, u64, u64)> = event_batch
-                    .into_iter()
-                    .map(|evt| {
-                        last_event_sequence += 1;
-                        (evt, last_event_sequence, batch_timestamp)
-                    })
-                    .collect();
+                for evt in reusable_events_buffer.drain(..) {
+                    last_event_sequence += 1;
+                    output_buffer.push((evt, last_event_sequence, batch_timestamp));
+                }
 
-                match self.dispatcher_tx.try_send(sequenced_batch) {
+                match self.dispatcher_tx.try_send(output_buffer.clone()) {
                     Ok(()) => {}
                     Err(TrySendError::Full(recovered_batch)) => {
                         eprintln!("[Backpressure] Dispatcher full, journaling batch to disk...");

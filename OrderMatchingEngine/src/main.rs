@@ -32,6 +32,7 @@ async fn main() {
     let tps_counter = Arc::new(AtomicU64::new(0));
 
     // main.rs
+    // Sending incoming order to Matching_Engine_service
     let (inbound_tx, inbound_rx) = mpsc::channel::<EnginePayload>(128);
     let (dispatcher_tx, mut dispatcher_rx) = mpsc::channel::<Vec<(MatchEvent, u64, u64)>>(100_000);
     let (kafka_tx, kafka_rx) = mpsc::channel::<Vec<(MatchEvent, u64, u64)>>(100_000);
@@ -42,9 +43,9 @@ async fn main() {
     let mut dispatcher_handle = None;
 
     // Receiving message from Kafka
-    let use_redpanda_consumer = true;
+    let use_redpanda_consumer = false;
     // Sending message to Kafka
-    let use_redpanda_producer = true;
+    let use_redpanda_producer = false;
 
     // Setting up kafka consumer
     if use_redpanda_consumer {
