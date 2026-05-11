@@ -14,6 +14,7 @@ pub struct OrderBook {
     // price, BookEntry
     pub asks: BTreeMap<u64, VecDeque<BookEntry>>,
     pub bids: BTreeMap<u64, VecDeque<BookEntry>>,
+    // Engine_Order_ID, Client_Order_ID, Price, Side
     pub order_locations: HashMap<u64, (u64, u64, Side)>,
     pub trade_id: u64,
 }

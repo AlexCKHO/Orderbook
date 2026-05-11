@@ -57,7 +57,6 @@ impl MatchingEngine for GrpcGateway {
         let tx = self.inbound_tx.clone();
         let (resp_tx, resp_rx) = mpsc::channel(100);
 
-        // Clock set up
         let base_nanos = self.base_unix_nanos;
         let base_q = self.base_quanta;
         let clock = self.clock.clone();
@@ -68,8 +67,8 @@ impl MatchingEngine for GrpcGateway {
             loop {
                 match in_stream.message().await {
                     Ok(Some(engine_batch_command)) => {
+                        let batch_id = engine_batch_command.batch_id;
                         let capacity = engine_batch_command.commands.len();
-                        // println!("📦 [DEBUG] Received batch! Size: {}", capacity);
 
                         let ingress_quanta = clock.now();
                         let delta =
@@ -77,73 +76,52 @@ impl MatchingEngine for GrpcGateway {
                         let timestamp = base_nanos + delta;
 
                         let mut batch = Vec::with_capacity(capacity);
-
                         for (idx, command) in engine_batch_command.commands.into_iter().enumerate()
                         {
                             match EngineAction::try_from(command) {
                                 Ok(action) => batch.push(action),
-                                Err(e) => {
-                                    eprintln!("⚠️ [PARSE ERROR] Batch index {}: ", idx);
-                                }
+                                Err(_e) => eprintln!("⚠️ [PARSE ERROR] Batch index {}: ", idx),
                             }
                         }
 
-                        let count = batch.len();
-                        if count > 0 {
+                        if !batch.is_empty() {
                             let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
-
                             if tx
                                 .send(EnginePayload {
                                     actions: batch,
                                     reply_tx: Some(ack_tx),
-                                    ingress_timestamp: timestamp
+                                    ingress_timestamp: timestamp,
                                 })
                                 .await
                                 .is_err()
                             {
-                                eprintln!("🔥 [CRITICAL] Matching Engine channel closed!");
                                 break;
                             }
 
                             let resp_tx_clone = resp_tx.clone();
-                            //Acknowledge order request gets in orderbook
                             tokio::spawn(async move {
-                                match ack_rx.await {
-                                    Ok(acks) => {
-                                        let reply = OrderBatchResponse {
-                                            success: true,
-                                            message: "Orders queued".into(),
-                                            timestamp,
-                                            acks,
-                                        };
-                                        let _ = resp_tx_clone.send(Ok(reply)).await;
-                                    }
-                                    Err(_) => {
-                                        eprintln!("❌ [ERROR] Engine dropped the ack channel!");
-                                    }
+                                if let Ok(acks) = ack_rx.await {
+                                    let reply = OrderBatchResponse {
+                                        batch_id,
+                                        success: true,
+                                        message: "Orders queued".into(),
+                                        timestamp,
+                                        acks,
+                                    };
+                                    let _ = resp_tx_clone.send(Ok(reply)).await;
                                 }
                             });
                         }
                     }
-                    Ok(None) => {
-                        println!("ℹ️ [DEBUG] Stream closed by client (Normal exit).");
-                        break;
-                    }
-                    Err(status) => {
-                        eprintln!(
-                            "❌ [GRPC ERROR] Stream broken: CODE: {:?}, MSG: {}",
-                            status.code(),
-                            status.message()
-                        );
-                        break;
-                    }
+                    Ok(None) => break, // Stream finished
+                    Err(_) => break,   // Stream error
                 }
-            }
+            } // Closes loop
             println!("🔍 [DEBUG] Worker task exited.");
-        });
+        }); // Closes tokio::spawn
 
         Ok(Response::new(Box::pin(ReceiverStream::new(resp_rx))))
-    }
+    } // Closes place_batch_stream
 
     type SubscribeEventsStream =
         Pin<Box<dyn Stream<Item = Result<ProtoMatchEvent, Status>> + Send>>;

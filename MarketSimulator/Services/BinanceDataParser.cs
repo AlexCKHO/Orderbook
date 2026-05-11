@@ -153,7 +153,7 @@ public class BinanceDataParser
     private static ulong ParsePriceToTicks(string priceText)
     {
         decimal price = decimal.Parse(priceText, CultureInfo.InvariantCulture);
-        return (ulong)(price * 100m);
+        return (ulong)(price * 1000m);
     }
 
     private static ulong ParseQtyToLots(string qtyText)

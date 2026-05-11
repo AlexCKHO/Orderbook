@@ -48,6 +48,9 @@ otherwise -------------------------------> no pacing
 
 class Program
 {
+    // Global sequence to guarantee every batch gets a unique ID across multiple concurrent streams
+    private static long _batchSequence = 0;
+
     static async Task Main(string[] args)
     {
         Console.WriteLine("⚡ [SETUP] Configuring gRPC Client...");
@@ -85,7 +88,6 @@ class Program
         var binPath = configuration["DataSettings:BinanceBinaryDataPath"];
         var jsonPath = configuration["DataSettings:BinanceJsonDataPath"];
         var engineCommands = new List<EngineCommand>();
-
 
         if (settings.UseHistorical)
         {
@@ -166,23 +168,6 @@ class Program
 
         var commands = engineCommands.ToArray();
 
-        // Print command details
-        // try
-        // {
-        //     engineCommands.ForEach(e =>
-        //     {
-        //         // Just access the property directly
-        //         if (e.PlaceOrder != null)
-        //         {
-        //             Console.WriteLine(e.PlaceOrder.ToString());
-        //         }
-        //     });
-        // }
-        // catch (Exception ex)
-        // {
-        //     Console.WriteLine(ex.Message);
-        // }
-
         Console.WriteLine($"✅ Loaded {commands.Length:N0} commands into RAM ready for benchmark.");
         Console.WriteLine();
         Console.WriteLine("💀 Select benchmark mode:");
@@ -241,7 +226,12 @@ class Program
 
         using var call = client.PlaceBatchStream();
 
-        var timestamps = new ConcurrentQueue<long>();
+
+        // 1 for reader, 1 for writer 
+        int concurrencyLevel = 2;
+        int initialCapacity = settings.NoOfOrderToTest;
+
+        var pendingBatches = new ConcurrentDictionary<ulong, long>(concurrencyLevel, initialCapacity);
         var latencies = new List<double>(commands.Length);
 
         var readTask = Task.Run(async () =>
@@ -250,15 +240,15 @@ class Program
             {
                 await foreach (var response in call.ResponseStream.ReadAllAsync())
                 {
-                    if (!response.Success)
-                        continue;
-
-                    if (timestamps.TryDequeue(out long startTicks))
+                    // Clean up the timestamp dict to prevent memory leaks on rejection
+                    if (pendingBatches.TryRemove(response.BatchId, out long startTicks))
                     {
-                        double elapsedMs =
-                            (Stopwatch.GetTimestamp() - startTicks) * 1000.0 / Stopwatch.Frequency;
+                        double elapsedMs = (Stopwatch.GetTimestamp() - startTicks) * 1000.0 / Stopwatch.Frequency;
                         latencies.Add(elapsedMs);
                     }
+
+                    if (!response.Success)
+                        continue;
 
                     Interlocked.Add(ref successCount, (long)response.Acks.Count);
                 }
@@ -286,7 +276,10 @@ class Program
                 var batch = new EngineBatchCommand();
                 batch.Commands.Add(command);
 
-                timestamps.Enqueue(Stopwatch.GetTimestamp());
+                // Assign the correlation ID before sending
+                batch.BatchId = (ulong)Interlocked.Increment(ref _batchSequence);
+                pendingBatches.TryAdd(batch.BatchId, Stopwatch.GetTimestamp());
+
                 await call.RequestStream.WriteAsync(batch);
             }
 
@@ -310,7 +303,6 @@ class Program
     {
         bool useHistoricalBatchPacing = settings.EnableHistoricalPacing;
 
-
         if (useHistoricalBatchPacing)
         {
             await SendOrdersByBatchHistorical(client, commands, settings);
@@ -329,11 +321,11 @@ class Program
         var sw = Stopwatch.StartNew();
         long successCount = 0;
         var tasks = new List<Task>();
+
+        // ConcurrentBag is safe for multiple stream reader threads
         var latencies = new ConcurrentBag<double>();
 
         int totalCommands = commands.Length;
-
-
         int commandsPerTask = totalCommands / settings.Concurrency;
 
         for (int i = 0; i < settings.Concurrency; i++)
@@ -347,7 +339,14 @@ class Program
             tasks.Add(Task.Run(async () =>
             {
                 using var call = client.PlaceBatchStream();
-                var batchTimestamps = new ConcurrentQueue<long>();
+
+                // Dictionary is perfectly thread-safe under load and locks timestamps to IDs
+                // 1 for reader, 1 for writer 
+                int concurrencyLevel = 2;
+                int initialCapacity = settings.NoOfOrderToTest;
+
+                var pendingBatches = new ConcurrentDictionary<ulong, long>(concurrencyLevel, initialCapacity);
+
                 var pacer = settings.EnableOrderPacing && settings.OrderRatePerSecond > 0
                     ? new OrderRatePacer(settings.PerStreamRate)
                     : null;
@@ -358,15 +357,15 @@ class Program
                     {
                         await foreach (var response in call.ResponseStream.ReadAllAsync())
                         {
-                            if (!response.Success)
-                                continue;
-
-                            if (batchTimestamps.TryDequeue(out long startTicks))
+                            if (pendingBatches.TryRemove(response.BatchId, out long startTicks))
                             {
-                                double elapsedMs =
-                                    (Stopwatch.GetTimestamp() - startTicks) * 1000.0 / Stopwatch.Frequency;
+                                double elapsedMs = (Stopwatch.GetTimestamp() - startTicks) * 1000.0 /
+                                                   Stopwatch.Frequency;
                                 latencies.Add(elapsedMs);
                             }
+
+                            if (!response.Success)
+                                continue;
 
                             Interlocked.Add(ref successCount, (long)response.Acks.Count);
                         }
@@ -388,7 +387,9 @@ class Program
 
                         if (batch.Commands.Count >= settings.BatchSize)
                         {
-                            batchTimestamps.Enqueue(Stopwatch.GetTimestamp());
+                            batch.BatchId = (ulong)Interlocked.Increment(ref _batchSequence);
+                            pendingBatches.TryAdd(batch.BatchId, Stopwatch.GetTimestamp());
+
                             await call.RequestStream.WriteAsync(batch);
 
                             if (pacer != null)
@@ -401,7 +402,9 @@ class Program
 
                     if (batch.Commands.Count > 0)
                     {
-                        batchTimestamps.Enqueue(Stopwatch.GetTimestamp());
+                        batch.BatchId = (ulong)Interlocked.Increment(ref _batchSequence);
+                        pendingBatches.TryAdd(batch.BatchId, Stopwatch.GetTimestamp());
+
                         await call.RequestStream.WriteAsync(batch);
 
                         if (pacer != null)
@@ -440,7 +443,11 @@ class Program
         using var call = client.PlaceBatchStream();
         var pacer = new TimestampRatePacer(settings.ReplaySpeed);
 
-        var batchSendTicks = new ConcurrentQueue<long>();
+        // 1 for reader, 1 for writer 
+        int concurrencyLevel = 2;
+        int initialCapacity = settings.NoOfOrderToTest;
+
+        var pendingBatches = new ConcurrentDictionary<ulong, long>(concurrencyLevel, initialCapacity);
         var latencies = new List<double>();
 
         var readTask = Task.Run(async () =>
@@ -449,15 +456,14 @@ class Program
             {
                 await foreach (var response in call.ResponseStream.ReadAllAsync())
                 {
-                    if (!response.Success)
-                        continue;
-
-                    if (batchSendTicks.TryDequeue(out long startTicks))
+                    if (pendingBatches.TryRemove(response.BatchId, out long startTicks))
                     {
-                        double elapsedMs =
-                            (Stopwatch.GetTimestamp() - startTicks) * 1000.0 / Stopwatch.Frequency;
+                        double elapsedMs = (Stopwatch.GetTimestamp() - startTicks) * 1000.0 / Stopwatch.Frequency;
                         latencies.Add(elapsedMs);
                     }
+
+                    if (!response.Success)
+                        continue;
 
                     Interlocked.Add(ref successCount, (long)response.Acks.Count);
                 }
@@ -474,8 +480,6 @@ class Program
             batch.Commands.Capacity = settings.BatchSize;
 
             long? batchTimestamp = null;
-
-
             long sentCount = 0;
             int total = commands.Length;
             int updateInterval = Math.Max(1, total / 100);
@@ -495,9 +499,10 @@ class Program
                 {
                     await pacer.WaitAsync(batchTimestamp);
 
-                    batchSendTicks.Enqueue(Stopwatch.GetTimestamp());
-                    await call.RequestStream.WriteAsync(batch);
+                    batch.BatchId = (ulong)Interlocked.Increment(ref _batchSequence);
+                    pendingBatches.TryAdd(batch.BatchId, Stopwatch.GetTimestamp());
 
+                    await call.RequestStream.WriteAsync(batch);
 
                     sentCount += batch.Commands.Count;
                     if (sentCount >= updateInterval || sentCount == total)
@@ -520,16 +525,18 @@ class Program
             {
                 sentCount += batch.Commands.Count;
                 DrawProgressBar(sentCount, total);
-            }
+                Console.WriteLine();
 
-            Console.WriteLine();
-
-            if (batch.Commands.Count > 0)
-            {
                 await pacer.WaitAsync(batchTimestamp);
 
-                batchSendTicks.Enqueue(Stopwatch.GetTimestamp());
+                batch.BatchId = (ulong)Interlocked.Increment(ref _batchSequence);
+                pendingBatches.TryAdd(batch.BatchId, Stopwatch.GetTimestamp());
+
                 await call.RequestStream.WriteAsync(batch);
+            }
+            else
+            {
+                Console.WriteLine();
             }
 
             await call.RequestStream.CompleteAsync();
@@ -598,15 +605,13 @@ class Program
 
     private static EngineCommand GenerateRandomOrderRequest(int index)
     {
-        
-        var testingOrderId = ComposeOrderId(1_000_000 , (uint)index);
+        var testingOrderId = ComposeOrderId(1_000_000, (uint)index);
         var testingAccountId = _decompose(testingOrderId);
         return new EngineCommand
         {
-            
             PlaceOrder = new OrderRequest
             {
-                ClientOrderId = ComposeOrderId(1_000_000 , (uint)index),
+                ClientOrderId = ComposeOrderId(1_000_000, (uint)index),
                 Price = (ulong)Random.Shared.Next(100, 201),
                 Qty = (ulong)Random.Shared.Next(1, 100),
                 Side = Random.Shared.Next(0, 2) == 0 ? Side.Bid : Side.Ask,
@@ -618,14 +623,13 @@ class Program
 
     private static EngineCommand GenerateRandomCancelRequest(int index)
     {
-        
-        var testingOrderId = ComposeOrderId(1_000_000 , (uint)index);
-        var testingAccountId = _decompose(testingOrderId);
         return new EngineCommand
         {
             CancelOrder = new CancelRequest
             {
-                EngineOrderId = ComposeOrderId(1_000_000 , (uint)index),
+                // Added ClientOrderId here so Cancel requests have a valid ID just in case
+                ClientOrderId = ComposeOrderId(2_000_000, (uint)index),
+                EngineOrderId = ComposeOrderId(1_000_000, (uint)index),
                 Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
             }
         };
@@ -638,7 +642,6 @@ class Program
         decimal progress = (decimal)current / total;
         int progressChars = (int)(progress * barSize);
 
-        // [====>----------] 45%
         string bar = new string('=', progressChars) + (progressChars < barSize ? ">" : "");
         string spaces = new string('-', barSize - bar.Length);
 
@@ -652,16 +655,12 @@ class Program
 
         return omsMask | baseId;
     }
-    
-    
+
     private static (uint accountId, uint sequence) _decompose(ulong orderId)
     {
-
         uint sequence = (uint)(orderId & 0xFFFFFFFF);
-
         uint accountId = (uint)((orderId >> 32) & 0x7FFFFFFF);
 
         return (accountId, sequence);
     }
-    
 }

@@ -80,14 +80,15 @@ async fn main() {
     }
 
     // gRPC setup...
-    if cfg.use_historical_data {
+    if cfg.use_grpc {
+        
         let grpc_gateway = GrpcGateway::new(inbound_tx.clone());
         let service = MatchingEngineServer::new(grpc_gateway)
             .max_decoding_message_size(32 * 1024 * 1024)
             .max_encoding_message_size(32 * 1024 * 1024);
 
         let addr = cfg
-            .historical_orders_grpc_addr
+            .orders_grpc_addr
             .parse()
             .expect("Invalid GRPC addr");
 

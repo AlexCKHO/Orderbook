@@ -41,7 +41,8 @@ message EngineCommand {
 }
 
 message EngineBatchCommand {
-  repeated EngineCommand commands = 1;
+  uint64 batch_id = 1;
+  repeated EngineCommand commands = 2;
 }
 
 message PublicTrade {
@@ -105,10 +106,11 @@ message OrderAck {
 }
 
 message OrderBatchResponse {
-  bool success = 1;
-  string message = 2;
-  int64 timestamp = 3;
-  repeated OrderAck acks = 4;
+  uint64 batch_id = 1;
+  bool success = 2;
+  string message = 3;
+  int64 timestamp = 4;
+  repeated OrderAck acks = 5;
 }
 
 message SubscribeRequest {}
