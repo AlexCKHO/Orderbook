@@ -49,7 +49,7 @@ otherwise -------------------------------> no pacing
 class Program
 {
     // Global sequence to guarantee every batch gets a unique ID across multiple concurrent streams
-    private static long _batchSequence = 0;
+     private static long _batchSequence = 0;
 
     static async Task Main(string[] args)
     {

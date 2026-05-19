@@ -1,0 +1,143 @@
+enums:
+  Side:
+    underlying_type: u8
+    values:
+      UNSPECIFIED: 0
+      BID: 1
+      ASK: 2
+
+  OrderType:
+    underlying_type: u8
+    values:
+      UNSPECIFIED: 0
+      LIMIT: 1
+      MARKET: 2
+
+  CancelRejectReason:
+    underlying_type: u8
+    values:
+      UNSPECIFIED: 0
+      ORDER_NOT_FOUND: 1
+
+  CommandType:
+    underlying_type: u8
+    values:
+      OrderRequest: 1
+      CancelRequest: 2
+
+  EventType:
+    underlying_type: u8
+    values:
+      OrderPlaced: 1
+      TradeExecuted: 2
+      OrderCancelled: 3
+      OrderKilled: 4
+      CancelRejected: 5
+      PublicTrade: 6
+
+structs:
+  OrderRequest:
+    fields:
+      - { name: client_order_id, type: u64 }
+      - { name: price,           type: u64 }
+      - { name: qty,             type: u64 }
+      - { name: side,            type: Side }
+      - { name: order_type,      type: OrderType }
+      - { name: padding,         type: "[u8; 6]" }
+      - { name: timestamp,       type: i64 }
+
+  CancelRequest:
+    fields:
+      - { name: client_order_id, type: u64 }
+      - { name: engine_order_id, type: u64 }
+      - { name: timestamp,       type: i64 }
+
+  EngineCommand:
+    fields:
+      - { name: command_type,    type: CommandType }
+      - { name: padding,         type: "[u8; 7]" }
+      - { name: place_order,     type: OrderRequest,  union_of: command_payload }
+      - { name: cancel_order,    type: CancelRequest, union_of: command_payload }
+
+  EngineBatchCommand:
+    fields:
+      - { name: packet_size,     type: u32 }
+      - { name: command_count,   type: u32 }
+      - { name: batch_id,        type: u64 }
+      - { name: commands,        type: "EngineCommand[16]" }
+
+  PublicTrade:
+    fields:
+      - { name: price,           type: u64 }
+      - { name: qty,             type: u64 }
+      - { name: taker_side,      type: Side }
+      - { name: padding,         type: "[u8; 7]" }
+      - { name: trade_id,        type: u64 }
+
+  OrderPlaced:
+    fields:
+      - { name: client_order_id, type: u64 }
+      - { name: engine_order_id, type: u64 }
+      - { name: price,           type: u64 }
+      - { name: qty,             type: u64 }
+      - { name: side,            type: Side }
+      - { name: padding,         type: "[u8; 7]" }
+
+  TradeExecuted:
+    fields:
+      - { name: maker_client_order_id, type: u64 }
+      - { name: taker_client_order_id, type: u64 }
+      - { name: maker_engine_order_id, type: u64 }
+      - { name: taker_engine_order_id, type: u64 }
+      - { name: price,                 type: u64 }
+      - { name: qty,                   type: u64 }
+      - { name: taker_side,            type: Side }
+      - { name: padding,               type: "[u8; 7]" }
+      - { name: trade_id,              type: u64 }
+
+  OrderCancelled:
+    fields:
+      - { name: client_order_id, type: u64 }
+      - { name: engine_order_id, type: u64 }
+      - { name: cancelled_qty,   type: u64 }
+
+  OrderKilled:
+    fields:
+      - { name: client_order_id, type: u64 }
+      - { name: killed_qty,      type: u64 }
+
+  CancelRejected:
+    fields:
+      - { name: client_order_id, type: u64 }
+      - { name: reason,          type: CancelRejectReason }
+      - { name: padding,         type: "[u8; 7]" }
+
+  MatchEvent:
+    fields:
+      - { name: packet_size,     type: u32 }
+      - { name: event_type,      type: EventType }
+      - { name: padding_1,       type: "[u8; 3]" }
+      - { name: sequence,        type: u64 }
+      - { name: timestamp,       type: u64 }
+      - { name: placed,          type: OrderPlaced,    union_of: event_payload }
+      - { name: filled,          type: TradeExecuted,  union_of: event_payload }
+      - { name: cancelled,       type: OrderCancelled, union_of: event_payload }
+      - { name: killed,          type: OrderKilled,    union_of: event_payload }
+      - { name: rejected,        type: CancelRejected, union_of: event_payload }
+      - { name: traded,          type: PublicTrade,    union_of: event_payload }
+
+  OrderAck:
+    fields:
+      - { name: client_order_id, type: u64 }
+      - { name: engine_order_id, type: u64 }
+
+  OrderBatchResponse:
+    fields:
+      - { name: packet_size,     type: u32 }
+      - { name: ack_count,       type: u32 }
+      - { name: batch_id,        type: u64 }
+      - { name: success,         type: u8 }
+      - { name: padding,         type: "[u8; 7]" }
+      - { name: timestamp,       type: i64 }
+      - { name: message,         type: "[u8; 32]" }
+      - { name: acks,            type: "OrderAck[16]" }
