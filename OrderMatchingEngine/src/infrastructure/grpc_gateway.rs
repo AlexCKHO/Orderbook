@@ -12,6 +12,35 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status, Streaming};
 
+// [Client Order]
+// │
+// ▼
+// 1. request: Request<Streaming<EngineBatchCommand>>  (Tonic parses raw network bytes)
+// │
+// ▼
+// 2. GrpcGateway Loop  (Creates EnginePayload + ack_tx oneshot channel)
+// │
+// ▼  tx.send(EnginePayload) ──► [ MPSC Channel ] ──► inbound_rx.blocking_recv()
+// │
+// ▼
+// 3. Matching Engine Service (Core 0)
+
+// 3. Matching Engine Service (Core 0)  (Processes order book, calls payload.reply_tx)
+// │
+// ▼  payload.reply_tx.send(acks) ──► [ Oneshot Channel ] ──► ack_rx.await
+// │
+// ▼
+// 4. Spawned Reply Task  (Wakes up, builds OrderBatchResponse)
+// │
+// ▼  resp_tx_clone.send(Ok(reply)) ──► [ MPSC Channel ] ──► resp_rx
+// │
+// ▼
+// 5. ReceiverStream::new(resp_rx)  (The exact exit point handed over to Tonic)
+// │
+// ▼
+// 6. Tonic Framework Layer  (Flushes final bytes back to Client)
+
+
 pub struct GrpcGateway {
     inbound_tx: mpsc::Sender<EnginePayload>,
     clock: Clock,
@@ -53,8 +82,14 @@ impl MatchingEngine for GrpcGateway {
         &self,
         request: Request<Streaming<EngineBatchCommand>>,
     ) -> Result<Response<Self::PlaceBatchStreamStream>, Status> {
+
+        // Incoming Engine Commands from clients
         let mut in_stream = request.into_inner();
+
+        // Entry of the tunnel to pass order request to matching engine service
         let tx = self.inbound_tx.clone();
+
+
         let (resp_tx, resp_rx) = mpsc::channel(100);
 
         let base_nanos = self.base_unix_nanos;
@@ -100,6 +135,8 @@ impl MatchingEngine for GrpcGateway {
 
                             let resp_tx_clone = resp_tx.clone();
                             tokio::spawn(async move {
+
+                                // Get OrderAck from matching_engine_service
                                 if let Ok(acks) = ack_rx.await {
                                     let reply = OrderBatchResponse {
                                         batch_id,
