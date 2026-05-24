@@ -7,6 +7,35 @@ using Orderbook;
 
 namespace MarketDataBroadcaster.Services;
 
+
+/*
+   NETWORK INTAKE                 IN-MEMORY PIPELINE (RAM DECOUPLING)                  NETWORK EGRESS
+   ===================   ========================================================   ======================
+   
+   ┌──────────────┐      ┌────────────────┐      ┌───────────────────┐      ┌─────────────────┐      ┌────────────────┐      ┌──────────────────┐
+   │ Kafka Broker │ ───► │ Ingestion Loop │ ───► │ _processingChannel│ ───► │ Processing Loop │ ───► │  SignalR Hub   │ ───► │ Connected Client │
+   │ (Topic Log)  │      │ (Dedicated OS) │      │ (Bounded Buffer)  │      │ (Worker Thread) │      │ (Outbound I/O) │      │ (Browser/Mobile) │
+   └──────────────┘      └────────────────┘      └───────────────────┘      └─────────────────┘      └────────────────┘      └──────────────────┘
+      [Raw Bytes]            [Consume()]              [TryWrite()]               [TryRead()]             [SendAsync()]            [Live UI Render]
+           │                      │                        │                          │                       │
+           │ (TCP Wire)           │                        │                          │ (Valid Payload)       │ (WebSockets / WSS)
+           └──────────────────────┘                        │                          └───────────────────────┘
+                                                           │
+                                                           │ (If Handoff Safe)                    (If Parse Fails)
+                                                           ▼                                      ▼
+                                                  ┌────────────────┐                     ┌────────────────┐
+                                                  │  StoreOffset   │                     │   Async DLQ    │
+                                                  │ (Memory Diary) │                     │ (Sidelined POI)│
+                                                  └────────────────┘                     └────────────────┘
+                                                           │
+                                                           │ (Every 5s Clock)
+                                                           ▼
+                                                  [ AutoCommit Thread ]
+                                                (Updates Kafka Broker State)
+
+ */
+
+
 public class IndividualEventConsumer : BackgroundService
 {
     private readonly IConfiguration _config;
